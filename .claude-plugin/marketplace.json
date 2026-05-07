@@ -1,0 +1,23 @@
+{
+  "name": "claude-gmail-attachments",
+  "owner": {
+    "name": "stuwags"
+  },
+  "metadata": {
+    "description": "Gmail attachment download skill — bridges the gmail-mcp body-only gap so any Claude environment can read PDF/image/docx/xlsx attachments.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "gmail-attachments",
+      "source": "./",
+      "description": "Download and read Gmail file attachments (PDF, image, CSV, docx, xlsx, etc.). Works on local Mac via ~/.gmail-mcp/ files, or remote VMs (Cowork, CI) via GMAIL_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN env vars.",
+      "version": "1.0.0",
+      "author": {
+        "name": "stuwags"
+      },
+      "keywords": ["gmail", "attachments", "pdf", "oauth", "cowork"],
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "gmail-attachments",
+  "version": "1.0.0",
+  "description": "Download and read Gmail file attachments (PDF, image, CSV, docx, xlsx, etc.). The gmail-mcp tools only return email body text; this skill calls the Gmail REST API to fetch attachment bytes. Works on local Mac via ~/.gmail-mcp/ files, or remote VMs (Cowork, CI) via GMAIL_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN env vars.",
+  "author": {
+    "name": "stuwags"
+  },
+  "keywords": ["gmail", "attachments", "pdf", "oauth", "cowork"],
+  "skills": ["./skills/gmail-attachments"]
+}
