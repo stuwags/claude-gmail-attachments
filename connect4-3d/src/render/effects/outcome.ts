@@ -157,7 +157,14 @@ const LINE_FRAGMENT = /* glsl */ `
     // rather than simply revealed.
     float head = smoothstep(0.14, 0.0, uProgress - vUv.y) * 0.8;
 
-    gl_FragColor = vec4(uColor * uIntensity * (rim + head), 1.0);
+    // Clamped, so uIntensity is the actual peak rather than a base that rim and
+    // head can multiply past. Unclamped these summed to 1.8x, making the spec's
+    // 2.4 into 4.3 on screen — far enough up AgX's shoulder that the core
+    // desaturated to white and the gold identity, which is the whole point of
+    // the win, was lost.
+    float shape = min(rim + head, 1.0);
+
+    gl_FragColor = vec4(uColor * uIntensity * shape, 1.0);
   }
 `;
 

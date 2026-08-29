@@ -14,7 +14,11 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Connect Four" />
-    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <!-- Explicit, so the browser does not fall back to requesting /favicon.ico
+         and logging a 404 on a page that ships perfectly good icons. -->
+    <link rel="icon" type="image/png" sizes="64x64" href="./icons/favicon-64.png" />
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
 
     <title>Connect Four — Grandmaster</title>
     <link rel="stylesheet" href="./src/ui/styles.css" />
