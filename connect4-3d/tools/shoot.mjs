@@ -16,7 +16,7 @@
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -176,7 +176,9 @@ async function main() {
     if (!DEVICES[d]) throw new Error(`unknown device "${d}" (have: ${Object.keys(DEVICES).join(', ')})`);
   }
 
-  await rm(SHOTS, { recursive: true, force: true });
+  // Only the scenes being rendered are replaced. Wiping the directory meant a
+  // partial run (one scene, one device) destroyed every other frame, and a
+  // reviewer comparing them would find half of them missing mid-review.
   await mkdir(SHOTS, { recursive: true });
 
   let server = null;

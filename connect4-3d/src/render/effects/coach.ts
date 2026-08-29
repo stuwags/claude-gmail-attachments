@@ -15,15 +15,18 @@
  * Urgency is encoded three ways at once — brightness, motion, and a doubled
  * ring stroke — so it survives colour-blindness and a greyscale screenshot.
  *
- * Deviation from §7.4, deliberate and worth knowing: the bible specifies a
- * dedicated overlay pass that depth-tests against the scene and multiplies by
- * 0.45 where it lies behind the panels. Because the panels are real
- * transmissive material, objects placed inside the board are already captured
- * in the transmission buffer and physically attenuated by the smoked acrylic.
- * Putting the overlay inside the slot gap therefore gets the same dimming from
- * the actual material rather than a magic constant, and costs no extra pass.
- * The bible sanctions the sorted-transparent approach for Tier B; this uses it
- * for both tiers for that reason.
+ * Deviation from §7.4, deliberate and worth knowing. The bible specifies a
+ * dedicated overlay pass that depth-tests against the scene and dims to 0.45
+ * where it lies behind the panels. This draws the filaments and rings in front
+ * of the front panel instead, in the sorted transparent queue that §7.4
+ * sanctions for Tier B.
+ *
+ * The reason is the front sheet: it is solid acrylic with a hole per cell, so a
+ * filament threaded through the discs inside the board gets chopped into one
+ * stub per disc by the material between the holes. That reads as a smudge on
+ * each disc rather than as a line joining them — and joining them is the entire
+ * lesson. Ghost discs still sit inside their slot, because a ghost is standing
+ * in for a real disc and belongs where that disc would be.
  */
 
 import {
@@ -445,6 +448,14 @@ class CoachOverlayImpl implements CoachOverlay {
     const mid = a.clone().add(b).multiplyScalar(0.5);
     const length = a.distanceTo(b);
 
+    // In front of the panel. Threaded through the discs inside the board, the
+    // solid acrylic between the holes chopped each filament into one stub per
+    // disc — which reads as a smudge on each disc rather than as a line joining
+    // them, and joining them is the entire lesson.
+    mid.z = PANEL_FRONT_Z + 0.0015;
+    a.z = mid.z;
+    b.z = mid.z;
+
     pooled.mesh.position.copy(mid);
     pooled.mesh.scale.set(1, length, 1);
     // The cylinder's axis is +Y; aim it down the line.
@@ -517,13 +528,16 @@ class CoachOverlayImpl implements CoachOverlay {
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
+      // Overlay elements are drawn over the board rather than depth-tested
+      // inside it; see placeFilament for why the acrylic made that necessary.
+      depthTest: false,
       side: DoubleSide,
       toneMapped: true,
     });
     const mesh = new Mesh(geometry, material);
     mesh.visible = false;
     // Draw after the opaque board so additive blending has something to add to.
-    mesh.renderOrder = 5;
+    mesh.renderOrder = 15;
     this.root.add(mesh);
     const pooled = { mesh, material };
     pool.push(pooled);
