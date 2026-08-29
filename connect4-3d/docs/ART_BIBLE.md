@@ -60,7 +60,7 @@ A single monolithic slab of honed basalt, the tabletop, floats in a dark studio 
 
 | Element | Dimension |
 |---|---|
-| Disc | diameter 42, thickness 9, edge fillet 1.5, two concentric lathed grooves at r = 12 and r = 17, groove depth 0.6, width 1.4 |
+| Disc | diameter 42, centre thickness 10.4, **convex spherical face crown, sagitta 1.4 across the 42 face (R = 158)**, back face flat, edge fillet 1.5, two concentric lathed grooves at r = 12 and r = 17 following the crowned surface, groove depth 0.6, width 1.4 |
 | Cell pitch | 46 x 46, grid 7 x 6 |
 | Front/back panel holes | diameter 36 (disc overlaps hole by 3 mm all around) |
 | Acrylic panels | 2 sheets, 6 thick, interior gap 11 |
@@ -100,7 +100,8 @@ One warm softbox key, a cool ambient fill, a hard cool rim. Warm key against coo
 |---|---|---|---|---|---|---|
 | Key | `RectAreaLight` | 1.2 x 1.8 | (-0.85, 1.35, 0.95) | at target | `#FFF1E3` | 9.0 |
 | Fill | `RectAreaLight` | 2.5 x 2.5 | (1.6, 0.9, 0.6) | at target | `#D8E3EE` | 2.2 |
-| Rim | `RectAreaLight` | 0.25 x 1.6 (vertical strip) | (0.45, 1.05, -1.40) | at (0, 0.30, 0) | `#EAF1FF` | 22.0 |
+| Rim | `RectAreaLight` | 0.25 x 0.40 (short vertical strip) | (0.70, 1.20, -1.30) | at (0, 0.30, 0) | `#EAF1FF` | 22.0 |
+| Catch card | `RectAreaLight` | 0.09 x 0.14 (vertical) | (-0.12, 0.08, 1.05) | at (0, 0.19, 0) | `#FFF4EA` | 20.0 |
 | Shadow proxy | `DirectionalLight` | n/a | along key axis | at origin | `#FFF1E3` | 1.6 |
 
 Treat the ratios as canonical (key : fill : rim = 1 : 0.24 : 2.4). If overall brightness needs retuning, touch `toneMappingExposure` only.
@@ -118,7 +119,8 @@ No HDR files. Build a `StudioEnvironment` scene, render once through `PMREMGener
 - Room: 4 x 3 x 4 m box, interior albedo `#0C0D0F`, `side: BackSide`.
 - Key card: 1.2 x 1.8 plane, emissive `#FFF1E3`, intensity 20, at the key light's position and orientation.
 - Fill card: 2.5 x 2.5 plane, emissive `#D8E3EE`, intensity 1.5, at the fill's position. (Was 4.5: 6.25 m2 hanging on the rim's side, double-counting the analytic fill that already carries the canonical 0.24.)
-- Rim card: 0.3 x 1.8 plane, emissive `#EAF1FF`, intensity 32, at the rim's position (cards mirror the rig, so it moves with the rim). Escalation if the table ratio still misses: 32 -> 24.
+- Rim card: 0.3 x 0.5 plane, emissive `#EAF1FF`, intensity 32, at the rim's position (cards mirror the rig, so it moves with the rim).
+- The catch card gets **no** environment copy. A PMREM copy of it re-clones the highlight and double-counts the energy; it is analytic only.
 - Horizon card: 3.0 x 1.6 plane behind the camera at y = 0.15, emissive `#35302A`, intensity 1.2. (Enlarged and lowered: aluminium is metalness 1.0, so a front-facing rail shows only what the environment holds in its mirror direction, and at y = 0.4 the card sat entirely above that path.) This is what puts a long warm streak in the tabletop sheen.
 
 `scene.environmentIntensity = 0.55`. The analytic lights model the form; the environment exists so every glossy surface reflects rectangles. Window-shaped highlights on the discs are the number one "expensive" tell and are a hard acceptance criterion.
@@ -386,9 +388,9 @@ Accents: contextual UI (turn capsule, coach chip states) uses the relevant playe
 
 Binary checks, each verifiable from screenshots of a Tier A build (items 17 and 18 from a device run). All 18 must pass.
 
-1. Disc highlights show rectangular, window-shaped softbox reflections, not point sparkles.
+1. Each disc face carries exactly one soft-edged rectangular catchlight, 10-16 mm on its long axis, peak 230-250, with an edge gradient at least 3 px wide and no hard clip boundary. Its position varies monotonically across the rows and drifts under camera parallax. No other specular on the disc exceeds 60 percent of the window's peak. Face body outside the window stays within 0.01 scene-linear of its card-off value.
 2. At 200 percent zoom, no polygonal faceting on any disc rim or hole edge.
-3. Every visible edge carries a lit chamfer or fillet; zero razor edges anywhere in frame.
+3. Every visible edge carries a lit chamfer or fillet; zero razor edges anywhere in frame. The right rail's chamfer line is continuous with no segment below 60 code. (An evenly lit arris is how CG looks; a ramp is how light behaves, so the ramp is accepted.)
 4. Discs seen through the front panel are visibly hazed and cool-tinted by the smoke, and refraction is visible at a grazing camera angle.
 5. Shadow penumbra visibly widens with occluder distance; no uniform hard-edged shadow, no gap between object and shadow.
 6. Contact darkening is present under the plinth and inside occupied slots (AO on, grounded).
@@ -435,3 +437,18 @@ Every entry here was driven by a measurement on a rendered frame, not by taste. 
 **R9 — Environment card intensities.** Rim card 45 to 32 (escalation to 24 available), fill card 4.5 to 1.5, horizon card 0.8 to 1.2 and enlarged from 3.0 x 0.6 at y = 0.4 to 3.0 x 1.6 at y = 0.15. The key light was never missing — the environment was drowning it, measured at 14/20/33 across the table thirds against the key's 16/15/8.
 
 **R10 — The plinth's screen band is 50-75 code values**, revised down from 80-105, which had been authored against an overbright render. Side rails stay 70-95, top rail front 95-125, and zero clipped pixels on metal.
+
+
+**R11 — The rim strip's length and height were both mis-authored, and the fix is elevation rather than azimuth.** R2's position put a 22-radiance strip 7.5 degrees off the slab's specular azimuth; at 74 degrees the slab is a near-mirror at 23 percent Fresnel, so the right-hand table strip read 155 against a 33-45 band and a four-render decomposition showed every unit of rim energy landing on the right third and none on the left. No non-zero rim setting passed. Every behind-the-board azimuth lies in some visible pixel's mirror path at low elevation, so the strip has to clear the mirror band entirely: 0.25 x 1.6 becomes 0.25 x 0.40 at (0.70, 1.20, -1.30), spanning y 1.00-1.40, with intensity restored to 22.0 and the canonical 1 : 0.24 : 2.4 back in force. Intensity is radiance for a `RectAreaLight`, so cutting the area removes table-washing flux while the reflected line on the stiles keeps its brightness — that asymmetry is the whole trick.
+
+**Governing rule (new, from R11).** No luminaire, analytic or environment card, may present its lower edge within 8 degrees above the slab's reflected-view elevation from any visible table pixel at any pose in the parallax envelope (15.7 degrees at rest, ~18.7 at the pitch extreme). The horizon card is the one designed exception.
+
+**R12 — The disc face is crowned, and item 1 is rewritten because its old numbers were a proxy that a wrong-looking solution could satisfy.** An off-axis kicker hit peak 230+ with genuine positional variance and produced a hard clipping white arc on every disc's lower rim — ten hot glints that were the highest-contrast thing in frame and read as wetness. The old wording encoded neither shape, placement, nor edge quality.
+
+The underlying geometry is why no card alone could work: a flat +Z face mirrors the view ray forward past the camera, where no light exists, so the only thing reaching the lacquer was the horizon card through PMREM — a direction-only lookup, which is exactly why 42 coplanar faces returned a pixel-identical highlight. And because the camera pitches down 8.8 degrees, the six rows do not share a mirror path at all: top-row faces reflect to y = +0.24, bottom-row faces into the table at y = -0.26. No single card position is visible to all six rows of flat coplanar faces.
+
+So the object changes. A 1.4 mm crown buys plus or minus 7.6 degrees of face-normal swing, hence 15.2 degrees of mirror coverage, which brings every row within reach of one card; the sagitta is capped by the 0.6 mm remaining slot clearance. A broad softbox is not an alternative: measured, 0.02 scene-linear of added white drops the disc greyscale separation to 11.5 L*, under item 14's floor.
+
+**The design law, stated once so it outlives this build: window brightness scales with radiance, body wash scales with flux.** Small-and-bright is the only corner of that trade where items 1 and 14 coexist.
+
+**R13 — The right rail's stepping and blue fringe are closed, not defects.** The 44-row stepping is a 1-px near-vertical specular line crossing pixel boundaries, and gets its verdict on real hardware under MSAA rather than on a software rasteriser. The 1-px blue fringe is chromatic aberration doing exactly what §4.5 specifies at a high-contrast near-vertical edge. No modelling change, no CA change.
