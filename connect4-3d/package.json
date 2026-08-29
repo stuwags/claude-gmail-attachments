@@ -13,7 +13,8 @@
     "cap:sync": "npm run build && cap sync",
     "cap:ios": "npm run build && cap sync ios && cap open ios",
     "shots": "npm run build && node tools/shoot.mjs",
-    "icons": "node tools/make-icons.mjs"
+    "icons": "node tools/make-icons.mjs",
+    "smoke": "npm run build && node tools/smoke.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

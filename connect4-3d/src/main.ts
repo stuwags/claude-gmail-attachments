@@ -32,11 +32,17 @@ interface DebugHook {
     showMenu?: boolean;
     quality?: QualityTier;
   }): Promise<void>;
+  /** Start a real match against the search, which `reset` deliberately does not. */
+  startVsComputer(difficulty?: Difficulty): Promise<void>;
   playMoves(cols: number[]): Promise<void>;
   beginDrop(col: number): Promise<void>;
   settle(): Promise<void>;
   frames(n: number): Promise<void>;
   stats(): unknown;
+  /** Current game state, for functional smoke tests. */
+  state(): unknown;
+  /** Synthesise a real pointer click over a column, exercising the input path. */
+  click(col: number): Promise<void>;
 }
 
 declare global {
@@ -168,6 +174,16 @@ async function boot(): Promise<void> {
       view.snapAnimations();
       await view.waitFrames(1);
     },
+    async startVsComputer(difficulty = 'easy') {
+      await controller.startMatch({
+        difficulty,
+        vsAi: true,
+        humanPlayer: Player.One,
+        coachMode: difficulty === 'easy' ? 'full' : 'off',
+      });
+      view.snapAnimations();
+      await view.waitFrames(1);
+    },
     async playMoves(cols) {
       controller.applyMovesInstantly(cols);
       view.snapAnimations();
@@ -179,6 +195,41 @@ async function boot(): Promise<void> {
       view.beginDrop(col, board.heightOf(col), board.toMove);
     },
     settle: () => view.settle(),
+    state: () => {
+      const board = controller.position;
+      const snapshot = controller.snapshot();
+      return {
+        phase: snapshot.phase,
+        toMove: board.toMove,
+        moveCount: board.moveCount,
+        history: [...board.history],
+        outcome: board.outcome(),
+        heights: Array.from({ length: 7 }, (_, c) => board.heightOf(c)),
+        acceptsInput: controller.acceptsInput,
+        urgentColumns: snapshot.urgentColumns,
+      };
+    },
+    async click(col) {
+      // Drives the real input path rather than the controller directly, so a
+      // smoke test exercises picking, the turn guard, and the drop animation.
+      const rect = canvas.getBoundingClientRect();
+      const ndcX = ((col - 3) / 3.5) * 0.42;
+      const point = {
+        clientX: rect.left + ((ndcX + 1) / 2) * rect.width,
+        clientY: rect.top + rect.height * 0.55,
+      };
+      for (const type of ['pointerdown', 'pointerup'] as const) {
+        canvas.dispatchEvent(
+          new PointerEvent(type, {
+            ...point,
+            pointerId: 1,
+            pointerType: 'mouse',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    },
     async frames(n) {
       for (let i = 0; i < n; i++) await nextFrame();
     },
