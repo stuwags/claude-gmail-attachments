@@ -288,17 +288,24 @@ vec3 catchlightRadiance( const in vec3 P, const in vec3 N, const in vec3 V, cons
   float u = dot( hit, uCatchU ) / ( lu * lu );
   float w = dot( hit, uCatchV ) / ( lv * lv );
 
-  // A rough surface blurs the emitter's edge by roughly alpha * t in metres.
-  // Feeding the real ray length in keeps the window crisp on lacquer and soft
-  // on blasted metal without a second code path, and stops the edge aliasing.
-  float blur = max( 0.006, rough * rough * t * 3.0 );
+  // A GGX lobe of roughness r spreads about alpha = r * r radians, so at a ray
+  // length of t it blurs the emitter's edge by alpha * t metres. Feeding the
+  // real ray length in keeps the bar crisp on lacquer and soft on the body
+  // layer without a second code path, and stops the edge aliasing.
+  float blur = max( 0.006, rough * rough * t );
   float su = blur / lu;
   float sw = blur / lv;
   float mask =
     smoothstep( -1.0 - su, -1.0 + su, u ) * ( 1.0 - smoothstep( 1.0 - su, 1.0 + su, u ) ) *
     smoothstep( -1.0 - sw, -1.0 + sw, w ) * ( 1.0 - smoothstep( 1.0 - sw, 1.0 + sw, w ) );
 
-  return uCatchRadiance * mask;
+  // Blurring an emitter spreads its energy over a larger rectangle, so the peak
+  // has to come down by the same ratio or a rough surface ends up reflecting
+  // more light than a mirror would. Below the emitter's own size this tends to
+  // 1, which is the right answer for the near-mirror clearcoat.
+  float energy = ( lu * lv ) / ( ( lu + blur ) * ( lv + blur ) );
+
+  return uCatchRadiance * mask * energy;
 }
 `;
 
