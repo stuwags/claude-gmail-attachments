@@ -31,66 +31,6 @@ function mulberry32(a) {
   };
 }
 
-/**
- * Parse a picture of a board. Rows are given TOP first, `x` = Player One,
- * `o` = Player Two, `.` = empty. Returns target[col][row].
- */
-function parse(picture) {
-  assert.equal(picture.length, ROWS, 'picture must have 6 rows');
-  const target = Array.from({ length: COLS }, () => new Array(ROWS).fill(null));
-  picture.forEach((line, i) => {
-    assert.equal(line.length, COLS, `row "${line}" must be 7 wide`);
-    const row = ROWS - 1 - i;
-    for (let c = 0; c < COLS; c++) {
-      const ch = line[c];
-      if (ch === 'x') target[c][row] = 'x';
-      else if (ch === 'o') target[c][row] = 'o';
-      else assert.equal(ch, '.', `unexpected character "${ch}"`);
-    }
-  });
-  return target;
-}
-
-/**
- * Find a legal move order that produces `target`, optionally leaving one cell
- * empty. Backtracks, so it succeeds whenever the position is reachable at all.
- */
-function orderFor(target, skip) {
-  let total = 0;
-  for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS; r++) {
-      if (target[c][r] !== null && !(skip && skip.col === c && skip.row === r)) total++;
-    }
-  }
-  const heights = new Array(COLS).fill(0);
-  const moves = [];
-  let visits = 0;
-  const dfs = (placed) => {
-    if (placed === total) return true;
-    if (++visits > 200000) throw new Error('orderFor: search blew up');
-    const want = placed % 2 === 0 ? 'x' : 'o';
-    for (let c = 0; c < COLS; c++) {
-      const r = heights[c];
-      if (r >= ROWS) continue;
-      if (skip && skip.col === c && skip.row === r) continue;
-      if (target[c][r] !== want) continue;
-      heights[c]++;
-      moves.push(c);
-      if (dfs(placed + 1)) return true;
-      heights[c]--;
-      moves.pop();
-    }
-    return false;
-  };
-  if (!dfs(0)) throw new Error('orderFor: position is not reachable by legal play');
-  return moves;
-}
-
-/** Build the pictured position, leaving `skip` empty if given. */
-function build(picture, skip) {
-  return Board.fromMoves(orderFor(parse(picture), skip));
-}
-
 /** Brute-force winner: scan all 69 windows of a flat cell snapshot. */
 function refWinner(cells) {
   for (const spec of WINDOWS) {
@@ -258,23 +198,12 @@ test('vertical win, reported bottom to top', () => {
 });
 
 test('diagonal-up win, reported bottom-left to top-right', () => {
-  const b = build(
-    [
-      '.......',
-      '.......',
-      '...x...',
-      '..xo...',
-      '.xoo...',
-      'xooo...',
-    ],
-    { col: 3, row: 3 },
-  );
-  assert.equal(b.toMove, Player.One);
+  const b = Board.fromMoves([6, 3, 5, 1, 2, 0, 6, 5, 2, 1, 0, 3, 3, 6, 4, 4, 0, 3, 5]);
   assert.equal(b.outcome().kind, 'ongoing');
-  b.play(3);
+  b.play(2);
   const out = b.outcome();
   assert.equal(out.kind, 'win');
-  assert.equal(out.winner, Player.One);
+  assert.equal(out.winner, Player.Two);
   assert.equal(out.direction, 'diagonal-up');
   assert.deepEqual(out.line, [
     { col: 0, row: 0 },
@@ -285,18 +214,8 @@ test('diagonal-up win, reported bottom-left to top-right', () => {
 });
 
 test('diagonal-down win, reported top-left to bottom-right', () => {
-  const b = build(
-    [
-      '.......',
-      '.......',
-      '...x...',
-      '...ox..',
-      '...oox.',
-      '...ooox',
-    ],
-    { col: 3, row: 3 },
-  );
-  assert.equal(b.toMove, Player.One);
+  const b = Board.fromMoves([4, 0, 2, 1, 6, 1, 3, 3, 4, 5, 2, 2, 1, 0, 5, 6, 4, 4, 6, 4, 2, 3]);
+  assert.equal(b.outcome().kind, 'ongoing');
   b.play(3);
   const out = b.outcome();
   assert.equal(out.kind, 'win');
@@ -310,155 +229,191 @@ test('diagonal-down win, reported top-left to bottom-right', () => {
   ]);
 });
 
-test('wins are found in all four corners and along both edges', () => {
-  const cases = [
-    // [picture, winning column, expected direction, expected line]
-    [
-      // bottom-left corner, horizontal
-      ['.......', '.......', '.......', '.......', '.oooo..', 'xxx.o..'],
-      3,
-      'horizontal',
-      [
-        { col: 0, row: 0 },
-        { col: 1, row: 0 },
-        { col: 2, row: 0 },
-        { col: 3, row: 0 },
-      ],
+// Real games (found by replaying random legal play until the wanted line came
+// up), so every fixture below is a position that can actually occur.
+const CORNER_AND_EDGE_WINS = [
+  {
+    name: 'bottom-left corner, horizontal',
+    moves: [5, 2, 5, 0, 4, 2, 0, 2, 5, 3, 6, 1],
+    winner: Player.Two,
+    direction: 'horizontal',
+    line: [
+      { col: 0, row: 0 },
+      { col: 1, row: 0 },
+      { col: 2, row: 0 },
+      { col: 3, row: 0 },
     ],
-    [
-      // bottom-left corner, vertical
-      ['.......', '.......', '.x.....', 'ox.....', 'ox.....', 'ox.....'],
-      0,
-      'vertical',
-      [
-        { col: 0, row: 0 },
-        { col: 0, row: 1 },
-        { col: 0, row: 2 },
-        { col: 0, row: 3 },
-      ],
+  },
+  {
+    name: 'bottom-left corner, vertical',
+    moves: [5, 6, 4, 3, 6, 1, 0, 5, 1, 6, 1, 4, 6, 5, 0, 2, 5, 5, 3, 5, 0, 1, 3, 6, 1, 3, 0],
+    winner: Player.One,
+    direction: 'vertical',
+    line: [
+      { col: 0, row: 0 },
+      { col: 0, row: 1 },
+      { col: 0, row: 2 },
+      { col: 0, row: 3 },
     ],
-    [
-      // bottom-right corner, horizontal
-      ['.......', '.......', '.......', '.......', '..oooo.', '..o.xxx'],
-      3,
-      'horizontal',
-      [
-        { col: 3, row: 0 },
-        { col: 4, row: 0 },
-        { col: 5, row: 0 },
-        { col: 6, row: 0 },
-      ],
+  },
+  {
+    name: 'bottom-right corner, horizontal',
+    moves: [
+      1, 6, 6, 5, 6, 6, 0, 3, 2, 1, 5, 6, 2, 6, 0, 1, 0, 3, 2, 0, 3, 2, 5, 5, 1, 1, 2, 2, 1, 0,
+      0, 3, 3, 4,
     ],
-    [
-      // bottom-right corner, vertical
-      ['.......', '.......', '.....x.', '.....xo', '.....xo', '.....xo'],
-      6,
-      'vertical',
-      [
-        { col: 6, row: 0 },
-        { col: 6, row: 1 },
-        { col: 6, row: 2 },
-        { col: 6, row: 3 },
-      ],
+    winner: Player.Two,
+    direction: 'horizontal',
+    line: [
+      { col: 3, row: 0 },
+      { col: 4, row: 0 },
+      { col: 5, row: 0 },
+      { col: 6, row: 0 },
     ],
-    [
-      // top-left corner, vertical (column 0 rows 2-5)
-      ['.......', 'x......', 'x......', 'x......', 'o......', 'o.xoxo.'],
-      0,
-      'vertical',
-      [
-        { col: 0, row: 2 },
-        { col: 0, row: 3 },
-        { col: 0, row: 4 },
-        { col: 0, row: 5 },
-      ],
+  },
+  {
+    name: 'bottom-right corner, vertical',
+    moves: [2, 2, 5, 3, 0, 0, 5, 2, 2, 6, 1, 6, 2, 4, 3, 6, 4, 5, 0, 6],
+    winner: Player.Two,
+    direction: 'vertical',
+    line: [
+      { col: 6, row: 0 },
+      { col: 6, row: 1 },
+      { col: 6, row: 2 },
+      { col: 6, row: 3 },
     ],
-    [
-      // top edge, horizontal on row 5
-      [
-        '.xxx...',
-        'oooo...',
-        'xxxo...',
-        'oooxx..',
-        'xxxoo..',
-        'ooox.x.',
-      ],
-      3,
-      'horizontal',
-      [
-        { col: 0, row: 5 },
-        { col: 1, row: 5 },
-        { col: 2, row: 5 },
-        { col: 3, row: 5 },
-      ],
+  },
+  {
+    name: 'top-left corner, vertical',
+    moves: [0, 5, 5, 6, 0, 1, 4, 3, 4, 0, 1, 1, 6, 3, 3, 0, 2, 0, 4, 6, 2, 0],
+    winner: Player.Two,
+    direction: 'vertical',
+    line: [
+      { col: 0, row: 2 },
+      { col: 0, row: 3 },
+      { col: 0, row: 4 },
+      { col: 0, row: 5 },
     ],
-    [
-      // top-right corner, diagonal-up ending at (6,5)
-      [
-        '......x',
-        '.....x.',
-        '....xo.',
-        '...xoo.',
-        '...oxo.',
-        '...oxox',
-      ],
-      6,
-      'diagonal-up',
-      [
-        { col: 3, row: 2 },
-        { col: 4, row: 3 },
-        { col: 5, row: 4 },
-        { col: 6, row: 5 },
-      ],
+  },
+  {
+    name: 'top-right corner, vertical',
+    moves: [1, 2, 4, 6, 0, 2, 5, 4, 6, 6, 4, 6, 0, 3, 3, 5, 1, 6, 2, 1, 5, 6],
+    winner: Player.Two,
+    direction: 'vertical',
+    line: [
+      { col: 6, row: 2 },
+      { col: 6, row: 3 },
+      { col: 6, row: 4 },
+      { col: 6, row: 5 },
     ],
-    [
-      // top-left corner, diagonal-down starting at (0,5)
-      [
-        'x......',
-        '.x.....',
-        'o.x....',
-        'ox.x...',
-        'oxo....',
-        'oxox...',
-      ],
-      0,
-      'diagonal-down',
-      [
-        { col: 0, row: 5 },
-        { col: 1, row: 4 },
-        { col: 2, row: 3 },
-        { col: 3, row: 2 },
-      ],
+  },
+  {
+    name: 'top edge, horizontal from the left corner',
+    moves: [
+      5, 3, 0, 0, 6, 4, 3, 6, 1, 6, 0, 1, 1, 6, 1, 5, 2, 3, 4, 1, 6, 3, 0, 5, 4, 2, 2, 2, 3, 2,
+      2, 6, 4, 0, 0, 5, 5, 5, 3, 4, 1,
     ],
-  ];
+    winner: Player.One,
+    direction: 'horizontal',
+    line: [
+      { col: 0, row: 5 },
+      { col: 1, row: 5 },
+      { col: 2, row: 5 },
+      { col: 3, row: 5 },
+    ],
+  },
+  {
+    name: 'top edge, horizontal into the right corner',
+    moves: [
+      3, 0, 1, 4, 5, 6, 4, 5, 6, 6, 4, 2, 0, 4, 5, 5, 1, 3, 3, 0, 1, 5, 5, 0, 3, 1, 0, 6, 4, 1,
+      4, 3, 3, 1, 0, 6, 6,
+    ],
+    winner: Player.One,
+    direction: 'horizontal',
+    line: [
+      { col: 3, row: 5 },
+      { col: 4, row: 5 },
+      { col: 5, row: 5 },
+      { col: 6, row: 5 },
+    ],
+  },
+  {
+    name: 'bottom-right corner, diagonal-down',
+    moves: [4, 0, 2, 1, 6, 1, 3, 3, 4, 5, 2, 2, 1, 0, 5, 6, 4, 4, 6, 4, 2, 3, 3],
+    winner: Player.One,
+    direction: 'diagonal-down',
+    line: [
+      { col: 3, row: 3 },
+      { col: 4, row: 2 },
+      { col: 5, row: 1 },
+      { col: 6, row: 0 },
+    ],
+  },
+  {
+    name: 'top-right corner, diagonal-up',
+    moves: [
+      2, 6, 6, 4, 5, 6, 4, 3, 2, 4, 6, 5, 0, 4, 0, 3, 4, 1, 4, 2, 2, 0, 1, 0, 2, 6, 5, 6, 2, 3,
+      5, 5,
+    ],
+    winner: Player.Two,
+    direction: 'diagonal-up',
+    line: [
+      { col: 3, row: 2 },
+      { col: 4, row: 3 },
+      { col: 5, row: 4 },
+      { col: 6, row: 5 },
+    ],
+  },
+  {
+    name: 'top-left corner, diagonal-down',
+    moves: [
+      2, 5, 1, 4, 1, 6, 5, 1, 1, 0, 6, 1, 3, 3, 4, 1, 6, 5, 6, 3, 4, 3, 5, 0, 0, 6, 0, 0, 5, 0,
+      3, 2, 6, 4, 2, 2,
+    ],
+    winner: Player.Two,
+    direction: 'diagonal-down',
+    line: [
+      { col: 0, row: 5 },
+      { col: 1, row: 4 },
+      { col: 2, row: 3 },
+      { col: 3, row: 2 },
+    ],
+  },
+];
 
-  for (const [picture, col, direction, line] of cases) {
-    const target = parse(picture);
-    const row = (() => {
-      // the winning disc is the highest x in `col` per the picture
-      for (let r = ROWS - 1; r >= 0; r--) if (target[col][r] !== null) return r;
-      throw new Error('no disc in the winning column');
-    })();
-    const b = build(picture, { col, row });
-    assert.equal(b.outcome().kind, 'ongoing', `${direction}: should not be won yet`);
-    assert.equal(b.toMove, Player.One, `${direction}: x should be on move`);
-    assert.equal(b.play(col), row);
+test('wins are found in all four corners and along both edges', () => {
+  for (const c of CORNER_AND_EDGE_WINS) {
+    const b = Board.fromMoves(c.moves.slice(0, -1));
+    assert.equal(b.outcome().kind, 'ongoing', `${c.name}: should not be won yet`);
+    const last = c.moves[c.moves.length - 1];
+    b.play(last);
     const out = b.outcome();
-    assert.equal(out.kind, 'win', `${direction}: expected a win`);
-    assert.equal(out.winner, Player.One);
-    assert.equal(out.direction, direction);
-    assert.deepEqual(out.line, line);
+    assert.equal(out.kind, 'win', `${c.name}: expected a win\n${b.toString()}`);
+    assert.equal(out.winner, c.winner, c.name);
+    assert.equal(out.direction, c.direction, c.name);
+    assert.deepEqual(out.line, c.line, `${c.name}\n${b.toString()}`);
+    // The winning line must touch the column that was just played.
+    assert.ok(out.line.some((p) => p.col === last), `${c.name}: line misses the last move`);
   }
 });
 
 test('a full board with no four is a draw', () => {
-  // Columns of alternating pairs: xxoo / ooxx per column pair never makes four.
-  const picture = ['ooxxoox', 'ooxxoox', 'xxooxxo', 'xxooxxo', 'ooxxoox', 'ooxxoox'];
-  const b = build(picture);
+  const b = Board.fromMoves([
+    4, 3, 4, 0, 4, 5, 3, 6, 2, 6, 2, 2, 2, 4, 0, 3, 3, 5, 2, 3, 6, 4, 3, 2, 0, 1, 5, 6, 6, 1, 6,
+    5, 1, 1, 5, 5, 4, 0, 0, 0, 1, 1,
+  ]);
   assert.equal(b.moveCount, CELLS);
   assert.equal(refWinner(b.cells()), null, 'the fixture must genuinely have no four');
   assert.deepEqual(b.outcome(), { kind: 'draw' });
   assert.deepEqual(b.legalMoves(), []);
+  for (let c = 0; c < COLS; c++) {
+    assert.equal(b.canPlay(c), false);
+    assert.throws(() => b.play(c), /full/);
+  }
+  // one move short of full is still ongoing
+  const almost = b.clone();
+  almost.undo();
+  assert.deepEqual(almost.outcome(), { kind: 'ongoing' });
 });
 
 test('outcome() agrees with a brute-force window scan over random games', () => {

@@ -11,7 +11,7 @@
  * Y = 0 and the grid is centred on X = 0; the board's mid-plane is Z = 0.
  */
 
-import { COLS, ROWS } from '../engine/types';
+import { COLS, ROWS } from '../engine/types.ts';
 
 const mm = (v: number) => v / 1000;
 

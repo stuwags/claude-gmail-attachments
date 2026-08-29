@@ -47,7 +47,10 @@ export const DEFAULT_TUNING: DropTuning = {
   killVelocity: 0.05,
   maxBounces: 4,
   rollAmplitude: (1.2 * Math.PI) / 180,
-  rollDecayTime: 0.27,
+  // Trimmed from the bible's nominal 300 ms so a full-height drop on this
+  // board's actual geometry (0.318 m, not the bible's rounded 0.30 m) still
+  // finishes inside the 480 ms settle budget.
+  rollDecayTime: 0.26,
   rollFrequency: 11,
 };
 

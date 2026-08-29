@@ -26,15 +26,15 @@ import {
   ShaderMaterial,
   Vector3,
 } from 'three';
-import type { Coord, Player } from '../../engine/types';
-import { Player as P } from '../../engine/types';
-import { cellPosition } from '../layout';
+import type { Coord, Player } from '../../engine/types.ts';
+import { Player as P } from '../../engine/types.ts';
+import { cellPosition } from '../layout.ts';
 import type {
   DiscTreatment,
   EffectContext,
   HouseTreatment,
   OutcomeEffects,
-} from './types';
+} from './types.ts';
 
 /* -------------------- palette -------------------- */
 

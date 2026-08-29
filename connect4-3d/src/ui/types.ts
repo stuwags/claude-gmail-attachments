@@ -8,9 +8,9 @@
  * replaceable without touching game logic.
  */
 
-import type { AiDecision, Difficulty, GameOutcome, Player } from '../engine/types';
-import type { CoachMode } from '../render/effects/types';
-import type { QualityTier } from '../render/api';
+import type { AiDecision, Difficulty, GameOutcome, Player } from '../engine/types.ts';
+import type { CoachMode } from '../render/effects/types.ts';
+import type { QualityTier } from '../render/api.ts';
 
 export type GamePhase =
   /** Title screen, board present but idle. */

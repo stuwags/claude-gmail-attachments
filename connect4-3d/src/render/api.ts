@@ -7,7 +7,7 @@
  * out entirely in a test — without the game logic noticing.
  */
 
-import type { Cell, Coord, Player, ThreatReport } from '../engine/types';
+import type { Cell, Coord, Player, ThreatReport } from '../engine/types.ts';
 
 /** Visual quality tier. Chosen automatically, overridable by the player. */
 export type QualityTier = 'low' | 'medium' | 'high' | 'ultra';

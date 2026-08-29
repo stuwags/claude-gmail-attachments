@@ -11,15 +11,15 @@
  * that no longer exists.
  */
 
-import { Board } from '../engine/board';
-import { analyze } from '../engine/threats';
-import { Player, other, type Coord, type Difficulty, type GameOutcome } from '../engine/types';
-import type { AiDecision, ThreatReport } from '../engine/types';
-import type { BoardView, QualityTier } from '../render/api';
-import type { CoachMode } from '../render/effects/types';
-import type { GamePhase, GameSnapshot, Hud, MatchConfig } from '../ui/types';
-import { AiClient } from './ai-client';
-import { AudioEngine } from './audio';
+import { Board } from '../engine/board.ts';
+import { analyze } from '../engine/threats.ts';
+import { Player, other, type Coord, type Difficulty, type GameOutcome } from '../engine/types.ts';
+import type { AiDecision, ThreatReport } from '../engine/types.ts';
+import type { BoardView, QualityTier } from '../render/api.ts';
+import type { CoachMode } from '../render/effects/types.ts';
+import type { GamePhase, GameSnapshot, Hud, MatchConfig } from '../ui/types.ts';
+import { AiClient } from './ai-client.ts';
+import { AudioEngine } from './audio.ts';
 
 /** Display names, from the art direction. */
 export const PLAYER_NAMES: Record<Player, string> = {
@@ -59,6 +59,8 @@ export class GameController {
   /** Seeds the AI so a given match replays identically. */
   private matchSeed = (Math.random() * 0x7fffffff) | 0;
   private hoveredColumn: number | null = null;
+  /** Cached threat analysis for the current position; null when the coach is off. */
+  private report: ThreatReport | null = null;
 
   constructor(private deps: ControllerDeps) {}
 
@@ -295,17 +297,21 @@ export class GameController {
    * ------------------------------------------------------------------ */
 
   /**
-   * Recompute the teaching overlay. Cheap — 69 windows — so it just runs after
-   * every board change rather than being cached and invalidated.
+   * Recompute the teaching overlay and cache the result for the next snapshot.
+   *
+   * `analyze` walks 69 windows and probes a move into every legal column, so it
+   * is cheap but not free; caching keeps it to once per board change rather
+   * than once per board change plus once per HUD publish.
    */
   private refreshCoach(): ThreatReport | null {
     if (this.config.coachMode === 'off' || this.phase === 'menu') {
+      this.report = null;
       this.deps.view.setTeachingOverlay(null, this.config.humanPlayer);
       return null;
     }
-    const report = analyze(this.board);
-    this.deps.view.setTeachingOverlay(report, this.config.humanPlayer);
-    return report;
+    this.report = analyze(this.board);
+    this.deps.view.setTeachingOverlay(this.report, this.config.humanPlayer);
+    return this.report;
   }
 
   setCoachMode(mode: CoachMode): void {
@@ -379,10 +385,9 @@ export class GameController {
 
   snapshot(): GameSnapshot {
     let urgent: number[] = [];
-    if (this.config.coachMode !== 'off' && this.phase === 'playing') {
-      const report = analyze(this.board);
+    if (this.report && this.phase === 'playing') {
       // A block the child must find outranks a win they might spot themselves.
-      urgent = [...new Set([...report.blockingMoves, ...report.winningMoves])];
+      urgent = [...new Set([...this.report.blockingMoves, ...this.report.winningMoves])];
     }
 
     return {

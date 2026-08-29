@@ -38,15 +38,15 @@ import {
   ShaderMaterial,
   Vector3,
 } from 'three';
-import type { Coord, Player, Threat, ThreatReport } from '../../engine/types';
-import { Player as P } from '../../engine/types';
+import type { Coord, Player, Threat, ThreatReport } from '../../engine/types.ts';
+import { Player as P } from '../../engine/types.ts';
 import {
   DISC_RADIUS,
   DISC_THICKNESS,
   PANEL_SANDWICH_DEPTH,
   cellPosition,
-} from '../layout';
-import type { CoachMode, CoachOverlay, EffectContext } from './types';
+} from '../layout.ts';
+import type { CoachMode, CoachOverlay, EffectContext } from './types.ts';
 
 /* -------------------- palette (bible §0) -------------------- */
 
@@ -229,6 +229,7 @@ class CoachOverlayImpl implements CoachOverlay {
   private report: ThreatReport | null = null;
   private toMove: Player = P.One;
   private inspected: number | null = null;
+  private inspectedRow: number | null = null;
   private time = 0;
   private lit = 0;
   private dirty = true;
@@ -272,9 +273,11 @@ class CoachOverlayImpl implements CoachOverlay {
     this.dirty = true;
   }
 
-  setInspectedColumn(col: number | null): void {
-    if (this.inspected === col) return;
+  setInspectedColumn(col: number | null, landingRow?: number | null): void {
+    const row = landingRow ?? null;
+    if (this.inspected === col && this.inspectedRow === row) return;
     this.inspected = col;
+    this.inspectedRow = row;
     this.dirty = true;
   }
 
@@ -403,9 +406,13 @@ class CoachOverlayImpl implements CoachOverlay {
 
   /** Where a disc dropped in the inspected column would land. */
   private inspectedLandingCell(): Coord | null {
-    if (this.inspected === null || !this.report) return null;
-    // Derive the landing row from any threat gap in that column, falling back
-    // to scanning the reported immediate gaps.
+    if (this.inspected === null) return null;
+    if (this.inspectedRow !== null) return { col: this.inspected, row: this.inspectedRow };
+
+    // No row supplied: recover it from any reported gap in that column. This
+    // only covers columns that already carry a threat, which is why callers
+    // should pass the row.
+    if (!this.report) return null;
     for (const t of this.report.threats) {
       for (const gap of t.immediateGaps) {
         if (gap.col === this.inspected) return gap;

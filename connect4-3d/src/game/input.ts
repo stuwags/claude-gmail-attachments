@@ -10,10 +10,10 @@
  * touching), so there is one code path rather than a mouse one and a touch one.
  */
 
-import type { BoardView } from '../render/api';
-import type { GameController } from './controller';
-import type { AudioEngine } from './audio';
-import { COLS } from '../engine/types';
+import type { BoardView } from '../render/api.ts';
+import type { GameController } from './controller.ts';
+import type { AudioEngine } from './audio.ts';
+import { COLS } from '../engine/types.ts';
 
 export interface InputOptions {
   canvas: HTMLCanvasElement;

@@ -10,8 +10,8 @@
  */
 
 import type { Object3D, PerspectiveCamera, Scene, WebGLRenderer } from 'three';
-import type { Coord, Player, ThreatReport } from '../../engine/types';
-import type { QualityTier } from '../api';
+import type { Coord, Player, ThreatReport } from '../../engine/types.ts';
+import type { QualityTier } from '../api.ts';
 
 /** What an effect system is handed when the scene builds it. */
 export interface EffectContext {
@@ -106,8 +106,14 @@ export interface CoachOverlay {
   /**
    * The column being hovered, which reveals every line through that column's
    * landing cell (§7.3). `null` clears the reveal.
+   *
+   * `landingRow` is the row a disc dropped now would come to rest in. The
+   * overlay cannot derive it from the threat report alone — a column with no
+   * threats in it yet has no reported cells — and that column is exactly the
+   * one a child most needs answered, so the caller must supply it. The scene
+   * already computes it for the hover ghost; pass the same value through.
    */
-  setInspectedColumn(col: number | null): void;
+  setInspectedColumn(col: number | null, landingRow?: number | null): void;
 
   /** Advance pulses and flow. Called once per frame with seconds elapsed. */
   update(dt: number): void;

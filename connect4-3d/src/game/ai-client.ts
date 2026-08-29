@@ -7,8 +7,8 @@
  * computer thinks.
  */
 
-import type { AiDecision, Difficulty } from '../engine/types';
-import type { AiRequest, AiResponse } from './ai-worker';
+import type { AiDecision, Difficulty } from '../engine/types.ts';
+import type { AiRequest, AiResponse } from './ai-worker.ts';
 
 export interface ThinkOptions {
   /** Columns played so far, in order. The whole game state. */

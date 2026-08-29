@@ -10,10 +10,10 @@
  * is seven bytes rather than a serialised object graph.
  */
 
-import { Board } from '../engine/board';
-import { chooseMove } from '../engine/ai';
-import { mulberry32 } from '../render/procedural';
-import type { AiDecision, Difficulty } from '../engine/types';
+import { Board } from '../engine/board.ts';
+import { chooseMove } from '../engine/ai.ts';
+import { mulberry32 } from '../render/procedural.ts';
+import type { AiDecision, Difficulty } from '../engine/types.ts';
 
 export interface AiRequest {
   id: number;

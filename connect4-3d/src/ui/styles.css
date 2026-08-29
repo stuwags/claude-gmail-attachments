@@ -1,0 +1,716 @@
+/*
+ * Interface chrome for Connect Four.
+ *
+ * Every number in this file traces back to docs/ART_BIBLE.md: the palette is
+ * §0, the type scale §8.1, the panel material §8.2, spacing / safe areas /
+ * touch targets §8.3, and the motion curves §5.1. Where the bible gives a
+ * number it is used verbatim.
+ *
+ * The one structural rule that is not in the bible: the chrome must never
+ * swallow pointer events destined for the 3D canvas. Every container is
+ * `pointer-events: none`; only the controls themselves opt back in.
+ */
+
+:root {
+  /* §0 palette. These are the only hues in the product. */
+  --c4-ember: #ce5a32;
+  --c4-petrol: #0f6068;
+  --c4-ember-glow: #ff9666;
+  --c4-petrol-glow: #53d7db;
+  --c4-gold: #ffd9a8; /* win banner only — §0, §9.16 */
+  --c4-pewter: #adb9c6;
+  --c4-void-low: #101114;
+  --c4-ink: #f2f1ee;
+  --c4-ink-dim: #9ba0a6;
+
+  /* Ink-tinted surfaces. No new hue: these are the ink colour at low alpha. */
+  --c4-surface: rgba(242, 241, 238, 0.06);
+  --c4-surface-hover: rgba(242, 241, 238, 0.1);
+  --c4-surface-on: rgba(242, 241, 238, 0.14);
+  --c4-hairline: rgba(255, 255, 255, 0.08);
+  --c4-hairline-lit: rgba(255, 255, 255, 0.14);
+
+  /* §8.1 type. The system stack; no downloaded fonts (§0). */
+  --c4-font:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial,
+    sans-serif;
+
+  /* §8.3 spacing scale. Nothing in this file steps off it. */
+  --s-4: 4px;
+  --s-8: 8px;
+  --s-12: 12px;
+  --s-16: 16px;
+  --s-24: 24px;
+  --s-32: 32px;
+  --s-48: 48px;
+
+  /* §5.1 named curves. */
+  --c4-ui-in: cubic-bezier(0.32, 0.72, 0, 1);
+  --c4-ui-out: cubic-bezier(0.4, 0, 1, 1);
+  --c4-hover: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* §8.3 safe areas: every anchored element pads by max(16px, env(...)). */
+  --c4-pad-top: max(16px, env(safe-area-inset-top));
+  --c4-pad-right: max(16px, env(safe-area-inset-right));
+  --c4-pad-bottom: max(16px, env(safe-area-inset-bottom));
+  --c4-pad-left: max(16px, env(safe-area-inset-left));
+
+  /* §8.3 minimum touch target, and the §8.3 turn-capsule height. */
+  --c4-tap: 44px;
+  --c4-capsule-h: 52px;
+
+  /*
+   * Title panel width. Sized so the panel clears the board at both shipping
+   * layouts: at 22 degrees vertical FOV and the §1.3 rest pose the board fills
+   * about 47% of frame width on Mac (1440x900) and 53% on iPad (1180x820),
+   * leaving 26.5% / 23.5% free at each edge. 22vw + a 16px inset stays inside
+   * both. The cap keeps it from ballooning on a large display.
+   */
+  --c4-menu-w: min(340px, max(260px, 22vw));
+  --c4-sheet-w: min(360px, max(280px, 30vw));
+
+  color-scheme: dark;
+}
+
+/* ------------------------------------------------------------------ *
+ * Document
+ * ------------------------------------------------------------------ */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--c4-void-low);
+  color: var(--c4-ink);
+  font-family: var(--c4-font);
+  font-size: 17px;
+  line-height: 22px;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The game controller owns pointer input over the board. */
+  touch-action: none;
+}
+
+/* The HUD mount point. Transparent to the pointer by default. */
+#ui-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-24);
+  color: var(--c4-ink);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ *
+ * Shared primitives
+ * ------------------------------------------------------------------ */
+
+.c4-hud {
+  position: absolute;
+  inset: 0;
+  font-family: var(--c4-font);
+  font-size: 17px;
+  line-height: 22px;
+  color: var(--c4-ink);
+  pointer-events: none;
+}
+
+.c4-hud *,
+.c4-hud *::before,
+.c4-hud *::after {
+  box-sizing: border-box;
+}
+
+.c4-hud :is(h1, h2, p) {
+  margin: 0;
+}
+
+/* Screen-reader-only, but still in the accessibility tree. */
+.c4-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/*
+ * §8.2 panel material, verbatim. The scene must stay readable-but-diffuse
+ * through it; the @supports block below is the required fallback for when
+ * backdrop-filter is unavailable — never a flat opaque grey rectangle.
+ */
+.c4-panel {
+  background: rgba(18, 20, 23, 0.55);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--c4-hairline);
+  border-top-color: var(--c4-hairline-lit);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+@supports not ((backdrop-filter: blur(24px)) or (-webkit-backdrop-filter: blur(24px))) {
+  .c4-panel {
+    background: rgba(18, 20, 23, 0.85);
+  }
+}
+
+/* §8.1 type styles. Sizes are points; on both target platforms 1pt = 1 CSS px. */
+.c4-t-banner {
+  font-size: 34px;
+  line-height: 41px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.c4-t-title {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+}
+
+.c4-t-headline {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.c4-t-body {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 400;
+}
+
+.c4-t-caption {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--c4-ink-dim);
+}
+
+/* The only uppercase in the product (§8.1). */
+.c4-t-micro {
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--c4-ink-dim);
+}
+
+/* §8.1: counters use tabular figures. */
+.c4-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Enter / leave. §5.1 ui-in 240ms, ui-out 160ms. */
+.c4-fade {
+  transition:
+    opacity 240ms var(--c4-ui-in),
+    transform 240ms var(--c4-ui-in),
+    visibility 0s;
+}
+
+.c4-fade[data-hidden] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 160ms var(--c4-ui-out),
+    transform 160ms var(--c4-ui-out),
+    visibility 0s linear 160ms;
+}
+
+/* ------------------------------------------------------------------ *
+ * Controls
+ * ------------------------------------------------------------------ */
+
+.c4-hud button {
+  margin: 0;
+  font: inherit;
+  color: var(--c4-ink);
+  background: var(--c4-surface);
+  border: 1px solid var(--c4-hairline);
+  border-radius: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    background-color 200ms var(--c4-hover),
+    border-color 200ms var(--c4-hover),
+    opacity 200ms var(--c4-hover);
+}
+
+/* §8.3: hover is an enhancement only — iPad must not get stuck hover states. */
+@media (hover: hover) {
+  .c4-hud button:hover:not(:disabled) {
+    background: var(--c4-surface-hover);
+    border-color: var(--c4-hairline-lit);
+    transition-duration: 120ms;
+  }
+}
+
+.c4-hud button:active:not(:disabled) {
+  background: var(--c4-surface-on);
+}
+
+.c4-hud button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Visible, high-contrast focus ring. #F2F1EE on the panel is about 15:1. */
+.c4-hud :focus-visible {
+  outline: 2px solid var(--c4-ink);
+  outline-offset: 2px;
+}
+
+/* Icon button: exactly the §8.3 minimum, and no smaller. */
+.c4-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--c4-tap);
+  height: var(--c4-tap);
+  padding: 0;
+  border-radius: 12px;
+}
+
+/* Segmented pickers — the one control idiom used throughout. */
+.c4-seg {
+  display: grid;
+  gap: var(--s-4);
+  pointer-events: auto;
+}
+
+.c4-seg--row {
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+.c4-seg--stack {
+  grid-auto-flow: row;
+}
+
+.c4-seg__opt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s-4);
+  min-height: var(--c4-tap);
+  padding: var(--s-8) var(--s-12);
+  text-align: left;
+  overflow: hidden;
+}
+
+.c4-seg--row .c4-seg__opt {
+  align-items: center;
+  text-align: center;
+}
+
+.c4-seg__opt[aria-checked='true'] {
+  background: var(--c4-surface-on);
+  border-color: var(--c4-hairline-lit);
+}
+
+/*
+ * §8.2 accent: a 3px indicator in the relevant colour. Neutral pickers get
+ * ink; the colour picker gets its player's glow. Never gold (§0).
+ */
+.c4-seg__opt::after {
+  content: '';
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 100%;
+  height: 3px;
+  background: var(--c4-seg-accent, var(--c4-ink));
+  opacity: 0;
+  transition: opacity 200ms var(--c4-hover);
+}
+
+.c4-seg__opt[aria-checked='true']::after {
+  opacity: 1;
+}
+
+.c4-seg__opt--ember {
+  --c4-seg-accent: var(--c4-ember-glow);
+}
+
+.c4-seg__opt--petrol {
+  --c4-seg-accent: var(--c4-petrol-glow);
+}
+
+.c4-seg__label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-8);
+}
+
+/* The disc swatch shows the real disc body colour (§3.1). */
+.c4-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--c4-seg-swatch, var(--c4-ink-dim));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.c4-seg__opt--ember .c4-swatch {
+  --c4-seg-swatch: var(--c4-ember);
+}
+
+.c4-seg__opt--petrol .c4-swatch {
+  --c4-seg-swatch: var(--c4-petrol);
+}
+
+.c4-seg__desc {
+  color: var(--c4-ink-dim);
+}
+
+.c4-field {
+  display: grid;
+  gap: var(--s-8);
+}
+
+/* ------------------------------------------------------------------ *
+ * In-play chrome (§8.3): settings, coach chip, turn capsule. Nothing else.
+ * ------------------------------------------------------------------ */
+
+.c4-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    'settings . coach'
+    '.        .  .'
+    '.   capsule  .';
+  padding: var(--c4-pad-top) var(--c4-pad-right) var(--c4-pad-bottom) var(--c4-pad-left);
+  pointer-events: none;
+}
+
+.c4-play__settings {
+  grid-area: settings;
+}
+
+.c4-play__coach {
+  grid-area: coach;
+}
+
+.c4-play__capsule {
+  grid-area: capsule;
+  justify-self: center;
+  align-self: end;
+}
+
+.c4-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-12);
+  min-height: var(--c4-tap);
+  padding: 0 var(--s-16);
+  border-radius: 12px;
+}
+
+.c4-chip__label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-4);
+}
+
+/*
+ * Coach level as two 3px segments, so the state survives a grayscale
+ * screenshot and colour-vision deficiency: off = none lit, hints = one,
+ * full = both (§7.3 cycles Off / Hints / Full).
+ */
+.c4-level {
+  display: flex;
+  gap: var(--s-4);
+}
+
+.c4-level__seg {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(242, 241, 238, 0.18);
+}
+
+.c4-level__seg[data-lit] {
+  background: var(--c4-accent, var(--c4-ink));
+}
+
+/* §8.3: bottom centre, 52pt tall. Not interactive — clicks fall through to the board. */
+.c4-capsule {
+  display: flex;
+  align-items: center;
+  gap: var(--s-12);
+  height: var(--c4-capsule-h);
+  padding: 0 var(--s-24);
+  max-width: min(520px, 100%);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.c4-capsule__bar {
+  flex: none;
+  width: 3px;
+  height: 24px;
+  border-radius: 2px;
+  background: var(--c4-accent, var(--c4-ink-dim));
+}
+
+.c4-capsule__text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Whose move it is, in that player's colour (§8.2). Glow hues, not body
+   hues: #CE5A32 on the panel is only 3.9:1, the glow is about 9:1. */
+.c4-capsule__turn {
+  color: var(--c4-accent, var(--c4-ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c4-capsule__advice {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------ *
+ * Title screen
+ * ------------------------------------------------------------------ */
+
+.c4-menu {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: var(--c4-pad-top) var(--c4-pad-right) var(--c4-pad-bottom) var(--c4-pad-left);
+  pointer-events: none;
+}
+
+.c4-menu__panel {
+  display: grid;
+  gap: var(--s-16);
+  width: var(--c4-menu-w);
+  max-height: 100%;
+  padding: var(--s-24);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.c4-menu[data-hidden] .c4-menu__panel,
+.c4-sheet[data-hidden] .c4-sheet__panel,
+.c4-banner[data-hidden] .c4-banner__panel {
+  transform: translateY(8px);
+}
+
+.c4-menu__panel,
+.c4-sheet__panel,
+.c4-banner__panel {
+  transition: transform 240ms var(--c4-ui-in);
+}
+
+.c4-menu__title {
+  display: grid;
+  gap: var(--s-4);
+  margin-bottom: var(--s-8);
+}
+
+.c4-menu__start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--c4-capsule-h);
+  margin-top: var(--s-8);
+  background: var(--c4-surface-on);
+  border-color: var(--c4-hairline-lit);
+}
+
+/* ------------------------------------------------------------------ *
+ * Settings sheet
+ * ------------------------------------------------------------------ */
+
+.c4-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 17, 20, 0.4);
+  pointer-events: auto;
+  transition: opacity 240ms var(--c4-ui-in);
+}
+
+.c4-scrim[data-hidden] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 160ms var(--c4-ui-out),
+    visibility 0s linear 160ms;
+}
+
+.c4-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: var(--c4-pad-top) var(--c4-pad-right) var(--c4-pad-bottom) var(--c4-pad-left);
+  pointer-events: none;
+}
+
+.c4-sheet__panel {
+  display: grid;
+  gap: var(--s-16);
+  width: var(--c4-sheet-w);
+  max-height: 100%;
+  padding: var(--s-16);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.c4-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-16);
+}
+
+.c4-rule {
+  height: 1px;
+  background: var(--c4-hairline);
+}
+
+.c4-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-8);
+}
+
+.c4-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--c4-tap);
+  padding: 0 var(--s-12);
+}
+
+.c4-actions__wide {
+  grid-column: 1 / -1;
+}
+
+.c4-readout {
+  display: grid;
+  gap: var(--s-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ *
+ * Outcome banner (§6)
+ * ------------------------------------------------------------------ */
+
+.c4-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--c4-pad-top) var(--c4-pad-right) var(--c4-pad-bottom) var(--c4-pad-left);
+  pointer-events: none;
+}
+
+.c4-banner__panel {
+  display: grid;
+  gap: var(--s-16);
+  justify-items: center;
+  max-width: min(520px, 100%);
+  padding: var(--s-24);
+  pointer-events: auto;
+}
+
+/* The tone accent is a 3px rule. Gold appears here and nowhere else (§0, §9.16). */
+.c4-banner__accent {
+  width: var(--s-48);
+  height: 3px;
+  border-radius: 2px;
+  background: var(--c4-ink-dim);
+}
+
+.c4-banner[data-tone='win'] .c4-banner__accent {
+  background: var(--c4-gold);
+}
+
+.c4-banner[data-tone='loss'] .c4-banner__accent {
+  background: var(--c4-pewter);
+}
+
+.c4-banner__text {
+  text-align: center;
+  text-wrap: balance;
+}
+
+.c4-banner__actions {
+  display: flex;
+  gap: var(--s-8);
+}
+
+.c4-banner__actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--c4-tap);
+  min-width: 96px;
+  padding: 0 var(--s-16);
+}
+
+/* ------------------------------------------------------------------ *
+ * Reduced motion: opacity only, nothing else moves.
+ * ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .c4-hud,
+  .c4-hud *,
+  .c4-hud *::before,
+  .c4-hud *::after {
+    transition-property: opacity !important;
+    transition-duration: 160ms !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}

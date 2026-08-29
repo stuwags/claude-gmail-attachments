@@ -9,7 +9,7 @@
  */
 
 import type { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
-import type { QualityTier } from '../api';
+import type { QualityTier } from '../api.ts';
 
 /**
  * Which depth-of-field regime is in force. `play` keeps the whole board sharp

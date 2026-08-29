@@ -9,9 +9,11 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --experimental-transform-types --test tests/*.test.mjs",
     "cap:sync": "npm run build && cap sync",
-    "cap:ios": "npm run build && cap sync ios && cap open ios"
+    "cap:ios": "npm run build && cap sync ios && cap open ios",
+    "shots": "npm run build && node tools/shoot.mjs",
+    "icons": "node tools/make-icons.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

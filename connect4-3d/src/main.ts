@@ -6,16 +6,16 @@
  * `window.__c4` hook the screenshot harness drives — see `tools/shoot.mjs`.
  */
 
-import { createBoardView } from './render/scene';
-import { createHud } from './ui/hud';
-import { AudioEngine } from './game/audio';
-import { AiClient } from './game/ai-client';
-import { GameController } from './game/controller';
-import { InputController } from './game/input';
-import { Player } from './engine/types';
-import type { QualityTier } from './render/api';
-import type { CoachMode } from './render/effects/types';
-import type { Difficulty } from './engine/types';
+import { createBoardView } from './render/scene.ts';
+import { createHud } from './ui/hud.ts';
+import { AudioEngine } from './game/audio.ts';
+import { AiClient } from './game/ai-client.ts';
+import { GameController } from './game/controller.ts';
+import { InputController } from './game/input.ts';
+import { Player } from './engine/types.ts';
+import type { QualityTier } from './render/api.ts';
+import type { CoachMode } from './render/effects/types.ts';
+import type { Difficulty } from './engine/types.ts';
 
 /** What `tools/shoot.mjs` calls to drive the game into a reviewable state. */
 interface DebugHook {
