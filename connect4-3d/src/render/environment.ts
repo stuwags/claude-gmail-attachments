@@ -312,7 +312,7 @@ export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   // entirely above that path, so the aluminium had nothing to reflect but the
   // black room. A taller card centred near the table plane lands in the mirror
   // path of both the rails and the slab, which is what the frame was missing.
-  const horizon = emissiveCard(3.0, 1.6, HORIZON_COLOR, 2.8, new Vector3(0, 0.15, 1.9));
+  const horizon = emissiveCard(3.0, 1.6, HORIZON_COLOR, 2.4, new Vector3(0, 0.15, 1.9));
   scene.add(horizon);
 
   const pmrem = new PMREMGenerator(renderer);
@@ -504,40 +504,49 @@ export function createLightRig(): LightRig {
  * disc's 1.5 mm rim fillet, the lathed grooves, and the aperture chamfers of
  * the front sheet. Those sweep their normals through tens of degrees, so they
  * mirror a source that the flat face cannot see at all — which is exactly the
- * placement below: 54 degrees off the face's mirror direction, up and camera
- * left, with its nearest edge still 29 degrees clear of the faces. The flat
- * faces stay the colour they were authored; the rims catch a bar of light whose
- * position around each disc is set by the direction from *that* disc to the
- * kicker, and therefore differs from cell to cell.
+ * placement below. It is solved rather than eyeballed, because "off axis" is
+ * not a feeling: reflecting the *whole front sheet* about +Z onto the kicker's
+ * own plane at z = 0.55 maps it to x in [-0.31, 0.23], y in [-0.13, 0.37], and
+ * the kicker is placed entirely outside that box with 0.17 m of clearance in x
+ * and 0.21 m in y — more than the 0.07 m the body layer's own lobe smears its
+ * edge by. Miss that clearance and the kicker lands *on* the sheet: at one
+ * point in this work it did, and the frame came back with a hard white
+ * rectangle laid across the upper-left of the board.
+ *
+ * The flat faces therefore stay the colour they were authored; the rims catch a
+ * bar of light whose position around each disc is set by the direction from
+ * *that* disc to the kicker, and therefore differs from cell to cell.
  */
 export const CATCHLIGHT = {
-  // Close, so the direction to it swings hard across a 0.37 m board: at 0.86 m
-  // the sweep is what makes the bar sit at a different place on every disc.
-  centre: new Vector3(-0.4, 0.72, 0.55),
+  // Close, so the direction to it swings hard across a 0.37 m board: the sweep
+  // is what makes the bar sit at a different place on every disc.
+  centre: new Vector3(-0.475, 0.84, 0.55),
   /**
    * Half-width along +X and half-height along +Y, metres.
    *
-   * Deliberately large in angle — 25 x 33 degrees from the board — because the
-   * rim fillet compresses the whole studio into 1.5 mm of surface: a source
-   * subtending 13 degrees lights a band of it 0.3 px wide, which antialiasing
-   * then throws away. Widening the source widens the band rather than
-   * brightening a sliver, and the nearest edge is still 29 degrees clear of the
-   * disc faces' mirror direction, which is what keeps the faces their own
-   * colour.
+   * Wide in angle, because the rim fillet compresses the whole studio into
+   * 1.5 mm of surface: a source subtending 13 degrees lights a band of it
+   * 0.3 px wide, which antialiasing then throws away. Widening the source
+   * widens the band rather than brightening a sliver.
    */
-  halfWidth: 0.4,
-  halfHeight: 0.55,
+  halfWidth: 0.425,
+  halfHeight: 0.42,
   colour: KEY_COLOR,
   /**
-   * Radiance, in the same scene-referred units as the analytic rig.
+   * Radiance, in the same scene-referred units as the analytic rig, and much
+   * higher than any of them.
    *
-   * High, and it has to be: the core it makes lands at near-normal incidence on
-   * a dielectric, so only about 8 % of it comes back (clearcoat 0.04 plus the
-   * body's 0.04), and 230 code values is 2.24 scene-linear. That is the whole
-   * reason a kicker is a small hard source rather than another softbox — it
-   * buys highlight brightness without buying irradiance.
+   * Three things stack against this number. A clearcoat returns 4 % at
+   * near-normal incidence; 230 code values is 2.24 scene-linear through AgX at
+   * the frozen exposure; and the band of rim fillet that mirrors the kicker is
+   * under a pixel wide, so antialiasing throws most of what lands there away.
+   * Measured, the weakest disc needed 4.4x the radiance that a full-coverage
+   * pixel would have needed. That is the whole reason a kicker is a small hard
+   * source and not another softbox: it is specular-only and misses every flat
+   * surface in the set, so it buys highlight brightness without buying a single
+   * unit of irradiance anywhere the exposure has been signed off.
    */
-  intensity: 350.0,
+  intensity: 2200.0,
 } as const;
 
 export interface Catchlight {

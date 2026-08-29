@@ -309,17 +309,29 @@ vec3 catchlightRadiance( const in vec3 P, const in vec3 N, const in vec3 V, cons
 }
 `;
 
+/**
+ * Where the kicker lands, and — as important — where it does not.
+ *
+ * Under a clearcoat the coat is the mirror: light reaching the body has already
+ * refracted through it, so adding the same rectangle a second time on a
+ * roughness-0.34 body layer would double-count it *and* smear it. That smear is
+ * not cosmetic. The body's lobe blurs the emitter's edge by alpha * t, about
+ * 70 mm at this range against the clearcoat's 9 mm, and the kicker is placed
+ * only just outside the front sheet's reflected footprint — so the body term
+ * would drag the rectangle back onto the sheet and put a white wash over the
+ * board, which is exactly what it did before this guard existed.
+ */
 const CATCHLIGHT_APPLY = /* glsl */ `
 #include <lights_fragment_end>
 {
-  float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
-  reflectedLight.directSpecular += catchlightRadiance( geometryPosition, geometryNormal, geometryViewDir, material.roughness )
-    * F_Schlick( material.specularColorBlended, material.specularF90, dotNV );
-
   #ifdef USE_CLEARCOAT
     float dotNVcatch = saturate( dot( geometryClearcoatNormal, geometryViewDir ) );
     clearcoatSpecularDirect += catchlightRadiance( geometryPosition, geometryClearcoatNormal, geometryViewDir, material.clearcoatRoughness )
       * F_Schlick( material.clearcoatF0, material.clearcoatF90, dotNVcatch );
+  #else
+    float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
+    reflectedLight.directSpecular += catchlightRadiance( geometryPosition, geometryNormal, geometryViewDir, material.roughness )
+      * F_Schlick( material.specularColorBlended, material.specularF90, dotNV );
   #endif
 }
 `;
