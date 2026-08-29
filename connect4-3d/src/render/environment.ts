@@ -2,23 +2,32 @@
  * The studio: image-based lighting, the analytic rig, the backdrop, and the
  * contact shadow that glues the set to the table. Bible §1.1, §2.
  *
- * The single most important thing in this file is that the environment map is
- * built from *rectangles*. A procedural gradient or an equirect sky gives every
- * glossy surface a round, featureless highlight, which is the giveaway that an
- * image was rendered rather than photographed. Four emissive cards in a black
- * box, baked through PMREM, put window-shaped reflections on the disc lacquer —
- * bible §9 item 1, and the reason this file exists at all.
+ * The single most important thing in this file is that every light is a
+ * *rectangle*. A procedural gradient or an equirect sky gives every glossy
+ * surface a round, featureless highlight, which is the giveaway that an image
+ * was rendered rather than photographed.
+ *
+ * The rectangles live in two places, and the split is load-bearing. Four
+ * emissive cards in a black box, baked through PMREM, give the whole set its
+ * ambient shape. But a cubemap is indexed by direction alone, so it cannot put
+ * a *different* highlight on two surfaces that happen to be parallel — which is
+ * every one of the 42 disc faces. The near-field softbox at the bottom of this
+ * file exists for exactly that: bible §9 item 1, and see `CATCHLIGHT` for why
+ * nothing already in §2.1 could reach the lacquer.
  */
 
 import {
   BackSide,
   BoxGeometry,
+  ClampToEdgeWrapping,
   Color,
   DataTexture,
   DirectionalLight,
   DoubleSide,
   Group,
   LinearFilter,
+  Matrix3,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MultiplyBlending,
@@ -38,7 +47,7 @@ import {
 } from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
-import { clamp01, mulberry32 } from './procedural';
+import { buildTexture, clamp01, mulberry32, smoothstep } from './procedural';
 import { CAMERA_TARGET, PLINTH_DEPTH, PLINTH_WIDTH } from './layout';
 
 /* ------------------------------------------------------------------ *
@@ -101,6 +110,21 @@ const RIM_COLOR = 0xeaf1ff;
 const HORIZON_COLOR = 0x35302a;
 
 const TARGET = new Vector3(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);
+
+/**
+ * The rim aims at the board's upper half, not at the table plane.
+ *
+ * Art-director ruling: at the old (1.15, 0.55, -1.25) the rim lit faces this
+ * camera never sees and dumped its radiance across the tabletop's right third
+ * — measured contribution across table thirds was 0 / 1 / 9. The camera freeze
+ * applied to the *view*; it never applied to the lights, so the rig was free to
+ * be re-staged and this is that re-staging.
+ */
+const RIM_POSITION = new Vector3(0.45, 1.05, -1.4);
+const RIM_AIM = new Vector3(0, 0.3, 0);
+
+/** §2.3's rim card, at the ruling's approved 32. */
+const RIM_CARD_INTENSITY = 32;
 
 /* ------------------------------------------------------------------ *
  * Blue noise
@@ -173,7 +197,14 @@ export function createBlueNoiseTexture(size = 64, seed = 0x5eed): DataTexture {
  * ------------------------------------------------------------------ */
 
 /** Emissive card, positioned at a light and aimed where the light aims. */
-function emissiveCard(w: number, h: number, hex: number, intensity: number, at: Vector3): Mesh {
+function emissiveCard(
+  w: number,
+  h: number,
+  hex: number,
+  intensity: number,
+  at: Vector3,
+  aim: Vector3 = TARGET,
+): Mesh {
   const material = new MeshBasicMaterial({ side: DoubleSide, toneMapped: false });
   // MeshBasicMaterial has no "emissive"; a Color above 1.0 is the same thing
   // once it lands in PMREM's half-float target, and keeps the whole capture in
@@ -181,7 +212,7 @@ function emissiveCard(w: number, h: number, hex: number, intensity: number, at: 
   material.color.setHex(hex).multiplyScalar(intensity);
   const mesh = new Mesh(new PlaneGeometry(w, h), material);
   mesh.position.copy(at);
-  mesh.lookAt(TARGET);
+  mesh.lookAt(aim);
   return mesh;
 }
 
@@ -211,8 +242,10 @@ export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   scene.add(emissiveCard(2.5, 2.5, FILL_COLOR, 1.5, new Vector3(1.6, 0.9, 0.6)));
   // 45 -> 32 (art-director revision): at 45 this card was the brightest thing
   // in the environment and lit the tabletop's right third harder than the key lit
-  // its left, inverting the whole key/fill relationship.
-  scene.add(emissiveCard(0.3, 1.8, RIM_COLOR, 32, new Vector3(1.15, 0.55, -1.25)));
+  // its left, inverting the whole key/fill relationship. Cards mirror the rig, so
+  // it travels with the analytic rim to (0.45, 1.05, -1.40) aimed at the board's
+  // upper half.
+  scene.add(emissiveCard(0.3, 1.8, RIM_COLOR, RIM_CARD_INTENSITY, RIM_POSITION, RIM_AIM));
 
   // Behind the camera: the long warm streak in the tabletop sheen, and the only
   // thing in the studio that a *front-facing* surface can reflect at all.
@@ -303,8 +336,8 @@ export function createLightRig(): LightRig {
   fill.lookAt(TARGET);
 
   const rim = new RectAreaLight(RIM_COLOR, 22.0 * RIG_SCALE, 0.25, 1.6);
-  rim.position.set(1.15, 0.55, -1.25);
-  rim.lookAt(TARGET);
+  rim.position.copy(RIM_POSITION);
+  rim.lookAt(RIM_AIM);
 
   const shadow = new DirectionalLight(KEY_COLOR, 1.6 * RIG_SCALE);
   shadow.position.copy(key.position);
@@ -356,6 +389,112 @@ export function createLightRig(): LightRig {
       fill.dispose();
       rim.dispose();
       shadow.dispose();
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Catchlight: the front softbox (bible §2.3, §9 item 1)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The fixture the discs were missing, and why none of the existing ones worked.
+ *
+ * A disc face is flat with its normal on +Z, so it mirrors the half-space *in
+ * front of* the board: the mirror ray from a disc leaves at about
+ * (-0.10, -0.15, +0.98), forward and slightly down-left, out past the camera.
+ * Every analytic light in §2.1 is behind that horizon — the key sits 49 degrees
+ * off the mirror direction and its nearest edge is still 24 degrees off, which
+ * with a clearcoat roughness of 0.12 is nothing at all. So no rectangle in the
+ * rig reaches the lacquer, and measurement agrees: the only thing in the mirror
+ * path was §2.3's horizon card.
+ *
+ * That card is also why the glint was *cloned*. It reaches the discs through
+ * `scene.environment`, and a PMREM cubemap is indexed by direction alone: 42
+ * coplanar disc faces look up the same texel and get pixel-identical
+ * highlights. Position-dependent reflections cannot come out of an environment
+ * map at all, however bright it is made — which is exactly what "the same
+ * bottom crescent on every one of the 42 discs" is a picture of.
+ *
+ * So this is a *near-field* rectangle: the studio's front softbox, evaluated
+ * per fragment against its real position and extent rather than sampled from a
+ * cube. Because the mirror ray starts at the shading point, where the rectangle
+ * lands on a disc depends on which disc it is — the reflected image walks
+ * across the board — and the crescent on the aperture chamfers walks with it.
+ *
+ * It is deliberately *not* baked into the PMREM scene. A card in the cubemap
+ * would restore the far-field lookup this exists to replace and double-count
+ * the same fixture; and it is specular-only for the same reason a photographer
+ * flags a catchlight off the set — its job is to be seen in the lacquer, not to
+ * model form, and letting it wash the diffuse would move every exposure the art
+ * director has already signed off.
+ *
+ * Placement is solved rather than guessed. Reflecting the board's cell centres
+ * about +Z onto the plane z = 1.0 m maps the 42 visible disc faces onto a
+ * 0.568 x 0.484 m footprint centred at (-0.107, 0.051); the softbox is exactly
+ * that rectangle. The consequence is the useful part: the frame rails, the
+ * plinth face and the tabletop all reflect to *outside* that footprint, so the
+ * softbox lands on the discs and the panel webs between them and on nothing
+ * else. The window's own edges therefore fall on the panel margins, which is
+ * where §9 item 1 wants to see them.
+ */
+export const CATCHLIGHT = {
+  centre: new Vector3(-0.107, 0.051, 1.0),
+  /** Half-width along +X and half-height along +Y, metres. */
+  halfWidth: 0.284,
+  halfHeight: 0.242,
+  colour: KEY_COLOR,
+  /**
+   * Radiance, in the same scene-referred units as the analytic rig.
+   *
+   * Set so the mirrored softbox lands the disc face just *under* §4.3's bloom
+   * threshold of 1.0 — a lacquer sheen that reads at roughly 190 code values —
+   * while the grazing Fresnel on the aperture chamfers and the disc's rim
+   * fillet takes the highlight core past 230. Pushing the flat face itself
+   * over 1.0 would bloom the whole disc body and fail §9 item 9.
+   */
+  intensity: 13.0,
+} as const;
+
+export interface Catchlight {
+  /** Shared uniform block; every hero material is wired to this same object. */
+  readonly uniforms: {
+    uCatchCentre: { value: Vector3 };
+    uCatchU: { value: Vector3 };
+    uCatchV: { value: Vector3 };
+    uCatchRadiance: { value: Color };
+  };
+  /** Re-express the rectangle in view space. Call once per frame, pre-render. */
+  update(viewMatrix: Matrix4): void;
+}
+
+export function createCatchlight(): Catchlight {
+  const centre = new Vector3();
+  const u = new Vector3();
+  const v = new Vector3();
+  const radiance = new Color(CATCHLIGHT.colour).multiplyScalar(CATCHLIGHT.intensity);
+
+  const worldCentre = CATCHLIGHT.centre.clone();
+  const worldU = new Vector3(CATCHLIGHT.halfWidth, 0, 0);
+  const worldV = new Vector3(0, CATCHLIGHT.halfHeight, 0);
+  const rotation = new Matrix3();
+
+  return {
+    uniforms: {
+      uCatchCentre: { value: centre },
+      uCatchU: { value: u },
+      uCatchV: { value: v },
+      uCatchRadiance: { value: radiance },
+    },
+    update(viewMatrix: Matrix4) {
+      // The shading point, its normal and the view vector all arrive in view
+      // space, so the rectangle has to meet them there. The half-axes are
+      // directions, not points: they take the view matrix's rotation block and
+      // must not pick up its translation.
+      centre.copy(worldCentre).applyMatrix4(viewMatrix);
+      rotation.setFromMatrix4(viewMatrix);
+      u.copy(worldU).applyMatrix3(rotation);
+      v.copy(worldV).applyMatrix3(rotation);
     },
   };
 }
@@ -528,6 +667,97 @@ export function createBackdrop(blueNoise: Texture): Backdrop {
       material.dispose();
     },
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Tabletop sheen smear (bible §3.3, as revised)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Where the smear lives, in metres of tabletop. `z0` is the plinth's front
+ * face; `depth` is the ruling's 0.18 m fade distance from plinth contact.
+ */
+export const SHEEN_REGION = {
+  halfWidth: 0.26,
+  z0: PLINTH_DEPTH / 2,
+  depth: 0.18,
+} as const;
+
+/**
+ * Peak additive radiance at the plinth contact line, scene-referred.
+ *
+ * The plinth renders at about 56 code values, which is 3.0e-2 scene-linear;
+ * the ruling asks for 20-30 % of object luminance, so the band is authored at
+ * a quarter of that. The board's dark mass is the other half of the effect and
+ * is a multiply, because a dark object in a reflection is the *absence* of the
+ * sheen the open table is showing, not a dark paint over it.
+ */
+export const SHEEN_GAIN = 7.6e-3;
+
+/**
+ * The slab's reflection of the object, painted rather than rendered.
+ *
+ * §3.3's `Reflector` line is struck: a half-resolution mirror of this set costs
+ * ~190k triangles, and the triangle budget is a performance contract rather
+ * than a target. What survives is the part of a reflection that is actually
+ * legible at clearcoatRoughness 0.35 — a vertically smeared band of the
+ * object's static masses — and honed stone would destroy anything finer than
+ * that, which is the physical alibi for painting it.
+ *
+ * Two channels, because a reflection is two things at once. RGB is what the
+ * plinth's lit edge and the top rail *add* to the slab; alpha is how much of
+ * the slab's own environment sheen the board's dark mass *takes away*. A pure
+ * multiply could not brighten and a pure add could not darken, and the smear
+ * needs both to read as a reflection instead of a decal.
+ *
+ * No disc colours and nothing dynamic: at this roughness the disc array is
+ * below the resolving power of the surface, and a smear that changed as the
+ * board filled would be the tell that it is painted.
+ */
+export function createTabletopSheen(size = 256): DataTexture {
+  // "Vertical stretch ~1.6:1": features are feathered 1.6x further along the
+  // depth axis (toward camera) than across it, which is what a grazing view of
+  // a slightly rough surface does to a reflection.
+  const STRETCH = 1.6;
+  const lateralFeather = 0.09;
+
+  const band = (v: number, centre: number, sigma: number) =>
+    Math.exp(-((v - centre) * (v - centre)) / (2 * sigma * sigma));
+
+  const tex = buildTexture({ size }, (u, v, out) => {
+    // Lateral falloff: the plinth is wider than the board, so its band reaches
+    // further out than the mass above it. Feathered, so this reads as sheen
+    // rather than as a decal with an edge.
+    const x = Math.abs(u - 0.5) * 2 * SHEEN_REGION.halfWidth;
+    const plinthLat = 1 - smoothstep(0.21 - lateralFeather * 0.5, 0.21 + lateralFeather * 0.5, x);
+    const boardLat = 1 - smoothstep(0.183 - lateralFeather * 0.5, 0.183 + lateralFeather * 0.5, x);
+
+    // Everything is gone by the far edge of the 0.18 m band, by construction.
+    const reach = 1 - smoothstep(0.62, 1.0, v);
+
+    // The plinth's lit front edge is the brightest real reflector in the set,
+    // and it sits right at the contact line.
+    const contact = band(v, 0.035, 0.055 * STRETCH) * plinthLat;
+    // A faint echo of the top rail, the only other bright horizontal in the
+    // object's silhouette.
+    const rail = band(v, 0.66, 0.075 * STRETCH) * boardLat * 0.22;
+    // The board between them: a dark mass that occludes the slab's own sheen.
+    const mass =
+      smoothstep(0.02, 0.12, v) * (1 - smoothstep(0.34, 0.60, v)) * boardLat;
+
+    const warm = (contact + rail) * reach;
+    // Warm anodised aluminium under a #FFF1E3 key, in linear.
+    out[0] = warm;
+    out[1] = warm * 0.86;
+    out[2] = warm * 0.70;
+    out[3] = 1 - 0.2 * mass * reach;
+  });
+  // The smear is a one-off patch of table, not a tile: repeating it would put a
+  // second reflection of the object at the far edge of the slab.
+  tex.wrapS = ClampToEdgeWrapping;
+  tex.wrapT = ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 /* ------------------------------------------------------------------ *

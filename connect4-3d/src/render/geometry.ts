@@ -330,6 +330,9 @@ export function createGhostDiscGeometry(): BufferGeometry {
  */
 const HOLE_SEGMENTS = 48;
 
+/** Fit clearance between an acrylic sheet's edge and the frame rail holding it. */
+const PANEL_CLEARANCE = 0.0004;
+
 /**
  * One acrylic sheet. `apertures` cuts the 42 windows; the back sheet is solid.
  *
@@ -346,8 +349,13 @@ const HOLE_SEGMENTS = 48;
  * behind the board, which is what §9 item 4 is checking for.
  */
 export function createPanelGeometry(apertures = true): BufferGeometry {
-  const w = (BOARD_WIDTH - 2 * RAIL_SECTION) / 2;
-  const h = (BOARD_HEIGHT - 2 * RAIL_SECTION) / 2;
+  // Seated with clearance rather than flush. Authored to the rail's inner face
+  // exactly, the sheet's edge and the stile's inner face were coplanar for the
+  // full height of the board — two surfaces fighting for the same pixels right
+  // where §9 item 3 wants one clean chamfer line, and a real set has a rebate
+  // here for the same reason a real set has a fit tolerance.
+  const w = (BOARD_WIDTH - 2 * RAIL_SECTION) / 2 - PANEL_CLEARANCE;
+  const h = (BOARD_HEIGHT - 2 * RAIL_SECTION) / 2 - PANEL_CLEARANCE;
   const shape = new Shape(roundedRect(w, h, 0.004, 4, 0, BOARD_CENTRE_Y));
   if (apertures) {
     for (let c = 0; c < COLS; c++) {

@@ -27,6 +27,7 @@ import {
   MeshPhysicalMaterial,
   ShaderMaterial,
   Vector2,
+  Vector3,
   type DataTexture,
   type Texture,
   type WebGLProgramParametersWithUniforms,
@@ -41,7 +42,13 @@ import {
   SimplexNoise,
   smoothstep,
 } from './procedural';
-import { PALETTE, RIG_SCALE } from './environment';
+import {
+  createTabletopSheen,
+  PALETTE,
+  RIG_SCALE,
+  SHEEN_GAIN,
+  SHEEN_REGION,
+} from './environment';
 import type { QualityTier } from './api';
 
 /** Per-instance vec4 the outcome sequence drives: ignition, desat, darken, roughness bias. */
@@ -237,6 +244,104 @@ function basaltSurface(size = 1024) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Catchlight (bible §2.3, §9 item 1)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The near-field softbox, evaluated by intersecting the mirror ray with it.
+ *
+ * The reflected image of a rectangle in a smooth surface is that rectangle, so
+ * tracing the mirror ray to the emitter's plane and testing whether it landed
+ * inside gives the window shape directly — no LTC tables, no numerical
+ * integration, and the *shape* is exact rather than a lobe that happens to look
+ * rectangular. What matters for §9 item 1 is that the ray starts at the shading
+ * point: two coplanar disc faces 0.28 m apart send their mirror rays to
+ * different parts of the softbox, so the highlight walks across the board.
+ * `scene.environment` cannot do that at any intensity, because a cubemap lookup
+ * is a function of direction alone.
+ *
+ * Peak reflected radiance is the emitter's own radiance, which is the correct
+ * answer for any source larger than the specular lobe — which this one is, by a
+ * wide margin, on every surface it touches.
+ */
+const CATCHLIGHT_PARS = /* glsl */ `
+uniform vec3 uCatchCentre;    // view space
+uniform vec3 uCatchU;         // view space, half-width vector
+uniform vec3 uCatchV;         // view space, half-height vector
+uniform vec3 uCatchRadiance;
+
+vec3 catchlightRadiance( const in vec3 P, const in vec3 N, const in vec3 V, const in float rough ) {
+  float lu = length( uCatchU );
+  float lv = length( uCatchV );
+  // Before the first frame has placed the camera the rectangle is degenerate,
+  // and normalising its zero-length normal would put a NaN through the frame.
+  if ( lu * lv < 1e-8 ) return vec3( 0.0 );
+
+  vec3 R = reflect( -V, N );
+  vec3 nrm = normalize( cross( uCatchU, uCatchV ) );
+  float dn = dot( R, nrm );
+  if ( abs( dn ) < 1e-4 ) return vec3( 0.0 );
+  float t = dot( uCatchCentre - P, nrm ) / dn;
+  if ( t <= 0.0 ) return vec3( 0.0 );
+
+  vec3 hit = P + R * t - uCatchCentre;
+  float u = dot( hit, uCatchU ) / ( lu * lu );
+  float w = dot( hit, uCatchV ) / ( lv * lv );
+
+  // A rough surface blurs the emitter's edge by roughly alpha * t in metres.
+  // Feeding the real ray length in keeps the window crisp on lacquer and soft
+  // on blasted metal without a second code path, and stops the edge aliasing.
+  float blur = max( 0.006, rough * rough * t * 3.0 );
+  float su = blur / lu;
+  float sw = blur / lv;
+  float mask =
+    smoothstep( -1.0 - su, -1.0 + su, u ) * ( 1.0 - smoothstep( 1.0 - su, 1.0 + su, u ) ) *
+    smoothstep( -1.0 - sw, -1.0 + sw, w ) * ( 1.0 - smoothstep( 1.0 - sw, 1.0 + sw, w ) );
+
+  return uCatchRadiance * mask;
+}
+`;
+
+const CATCHLIGHT_APPLY = /* glsl */ `
+#include <lights_fragment_end>
+{
+  float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
+  reflectedLight.directSpecular += catchlightRadiance( geometryPosition, geometryNormal, geometryViewDir, material.roughness )
+    * F_Schlick( material.specularColorBlended, material.specularF90, dotNV );
+
+  #ifdef USE_CLEARCOAT
+    float dotNVcatch = saturate( dot( geometryClearcoatNormal, geometryViewDir ) );
+    clearcoatSpecularDirect += catchlightRadiance( geometryPosition, geometryClearcoatNormal, geometryViewDir, material.clearcoatRoughness )
+      * F_Schlick( material.clearcoatF0, material.clearcoatF90, dotNVcatch );
+  #endif
+}
+`;
+
+/** Uniform block shared by every material the catchlight touches. */
+export type CatchlightUniforms = Record<string, { value: unknown }>;
+
+/**
+ * Wire a material to the catchlight. Composes with an existing
+ * `onBeforeCompile`, so the disc can carry both this and its treatment
+ * attribute.
+ */
+function injectCatchlight(
+  material: MeshPhysicalMaterial,
+  uniforms: CatchlightUniforms,
+  cacheKey: string,
+): void {
+  const previous = material.onBeforeCompile.bind(material);
+  material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer) => {
+    previous(shader, renderer);
+    for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${CATCHLIGHT_PARS}`)
+      .replace('#include <lights_fragment_end>', CATCHLIGHT_APPLY);
+  };
+  material.customProgramCacheKey = () => cacheKey;
+}
+
+/* ------------------------------------------------------------------ *
  * Ghost / overlay shader (bible §3.4)
  * ------------------------------------------------------------------ */
 
@@ -339,6 +444,7 @@ export interface MaterialLibrary {
 export function createMaterials(
   grooveBands: { v0: number; v1: number }[],
   discProfileLength: number,
+  catchlight: CatchlightUniforms,
 ): MaterialLibrary {
   const textures: Texture[] = [];
   const keep = <T extends Texture>(t: T): T => {
@@ -383,6 +489,7 @@ export function createMaterials(
   // is far below the threshold where a normal map starts to look like texture.
   disc.clearcoatNormalScale = new Vector2(0.06, 0.06);
   injectDiscTreatment(disc);
+  injectCatchlight(disc, catchlight, 'disc-treatment-catchlight-v1');
 
   /* ---- acrylic ---- */
 
@@ -416,6 +523,10 @@ export function createMaterials(
   // Cast acrylic is nearly optically flat. Any more than this and the veiling
   // haze the bible wants turns into frosting.
   acrylic.normalScale = new Vector2(0.08, 0.08);
+  // The front sheet shares the discs' +Z normal, so the softbox lands on the
+  // webs between apertures and on the panel margins — which is where the
+  // window's own edges become visible as a rectangle rather than as a wash.
+  injectCatchlight(acrylic, catchlight, 'acrylic-catchlight-v1');
 
   /* ---- acrylic, back sheet ---- */
 
@@ -502,6 +613,8 @@ export function createMaterials(
     side: FrontSide,
   });
   basalt.normalScale = new Vector2(0.15, 0.15);
+  const sheen = keep(createTabletopSheen());
+  injectTabletopSheen(basalt, sheen);
 
   /* ---- hover rim strokes ---- */
 
@@ -559,6 +672,66 @@ function acrylicMicroNormal(size = 256): DataTexture {
     return waviness + polish;
   });
   return buildNormalMap({ size, strength: 0.12 }, height);
+}
+
+/* ------------------------------------------------------------------ *
+ * Tabletop sheen (bible §3.3, as revised)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Paint the object's reflection into the slab.
+ *
+ * It goes into the basalt shader rather than onto a decal mesh for two reasons.
+ * It costs no draw call, and — the reason the ruling asks for it — the additive
+ * half is multiplied by the material's own `diffuse`, which is the uniform the
+ * win sequence drives with §6.1's house dim. The reflection therefore darkens
+ * with the table it lives on, with no second code path to keep in sync.
+ *
+ * The lookup is world XZ rather than the slab's UV, because the stone albedo
+ * tiles four times across the slab and the reflection must not.
+ */
+function injectTabletopSheen(material: MeshPhysicalMaterial, sheen: DataTexture): void {
+  material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
+    shader.uniforms.uSheenMap = { value: sheen };
+    shader.uniforms.uSheenGain = { value: SHEEN_GAIN };
+    shader.uniforms.uSheenRegion = {
+      value: new Vector3(SHEEN_REGION.halfWidth, SHEEN_REGION.z0, SHEEN_REGION.depth),
+    };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vSheenXZ;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vSheenXZ = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;`,
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec2 vSheenXZ;
+        uniform sampler2D uSheenMap;
+        uniform float uSheenGain;
+        uniform vec3 uSheenRegion;`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `{
+          vec2 sheenUv = vec2(
+            ( vSheenXZ.x + uSheenRegion.x ) / ( 2.0 * uSheenRegion.x ),
+            ( vSheenXZ.y - uSheenRegion.y ) / uSheenRegion.z );
+          if ( all( greaterThanEqual( sheenUv, vec2( 0.0 ) ) ) && all( lessThanEqual( sheenUv, vec2( 1.0 ) ) ) ) {
+            vec4 smear = texture2D( uSheenMap, sheenUv );
+            // Alpha occludes the slab's own sheen where the board's dark mass
+            // sits; rgb adds what the plinth edge and the top rail put back.
+            outgoingLight = outgoingLight * smear.a + smear.rgb * uSheenGain * diffuse;
+          }
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  material.customProgramCacheKey = () => 'tabletop-sheen-v1';
 }
 
 /* ------------------------------------------------------------------ *

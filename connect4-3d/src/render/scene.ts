@@ -52,12 +52,14 @@ import {
   buildEnvironmentMap,
   createBackdrop,
   createBlueNoiseTexture,
+  createCatchlight,
   createContactShadow,
   createLightRig,
   PALETTE,
   RIG_SCALE,
   TONE_EXPOSURE,
   type Backdrop,
+  type Catchlight,
   type LightRig,
 } from './environment';
 import type {
@@ -299,6 +301,12 @@ class BoardScene implements SceneBoardView {
   private materials!: MaterialLibrary;
   private ghostMat!: GhostMaterial;
   private lights!: LightRig;
+  /**
+   * The near-field front softbox (environment.ts). It has no scene node — it is
+   * a rectangle the hero shaders intersect — so the frame loop is what keeps it
+   * in view space.
+   */
+  private readonly catchlight: Catchlight = createCatchlight();
   private backdrop!: Backdrop;
   private envMap: Texture | null = null;
   private blueNoise = createBlueNoiseTexture();
@@ -425,7 +433,11 @@ class BoardScene implements SceneBoardView {
     this.scene.environmentIntensity = 0.55 * RIG_SCALE;
 
     const disc = createDiscGeometry();
-    this.materials = createMaterials(disc.grooveBands, disc.profileLength);
+    this.materials = createMaterials(
+      disc.grooveBands,
+      disc.profileLength,
+      this.catchlight.uniforms,
+    );
     this.materials.setTier(this.quality);
     this.ghostMat = createGhostMaterial(this.reducedMotion);
 
@@ -673,6 +685,13 @@ class BoardScene implements SceneBoardView {
     this.outcome.update(dt);
     this.coach?.update(dt);
     this.applyOutcome();
+
+    // The catchlight is expressed in view space, so it has to be refreshed after
+    // the rig has placed the camera and before anything draws. `updateMatrixWorld`
+    // on a camera is what refreshes `matrixWorldInverse`; the renderer would do
+    // it too, but not until after the shaders had already read stale uniforms.
+    this.camera.updateMatrixWorld();
+    this.catchlight.update(this.camera.matrixWorldInverse);
 
     if (this.post) this.post.render(dtMs);
     else this.renderer.render(this.scene, this.camera);
