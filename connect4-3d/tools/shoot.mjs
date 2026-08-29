@@ -34,10 +34,26 @@ const LAUNCH_ARGS = [
   '--mute-audio',
 ];
 
-/** Logical sizes and DPR of the two devices this game targets. */
+/**
+ * Logical sizes and DPR of the two devices this game targets.
+ *
+ * `viewport` has to be nested: Playwright silently ignores stray top-level
+ * `width`/`height` keys on a context, so a flat object would quietly capture
+ * every shot at the default 1280x720 while claiming to be a Retina Mac.
+ */
 const DEVICES = {
-  mac: { width: 1440, height: 900, deviceScaleFactor: 2, isMobile: false, hasTouch: false },
-  ipad: { width: 1180, height: 820, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  mac: {
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    isMobile: false,
+    hasTouch: false,
+  },
+  ipad: {
+    viewport: { width: 1180, height: 820 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  },
 };
 
 /**

@@ -138,7 +138,9 @@ const GRAIN_FLOOR_RATIO = 0.006 / 0.018;
  * perturbation using a gamma-2.2 slope proxy (see the shader). AgX's real slope
  * at mid grey is 0.83x that proxy, so the amplitude uniform carries the
  * reciprocal; without it the delivered grain would be ~17% shy of §4.7's 0.018.
- * Calibrated against AgX at exposure 1.15 on a linear 0.18 patch.
+ * Calibrated against AgX at exposure 1.15 on a linear 0.18 patch, and confirmed
+ * by measurement: a flat mid-grey field renders with a grain standard deviation
+ * of 2.7/255, which is the 2.65 a uniform +/-0.018 peak predicts.
  */
 const GRAIN_AGX_SLOPE_CORRECTION = 1.206;
 
@@ -231,9 +233,10 @@ const gallery = cubicBezier(0.33, 0, 0.12, 1);
  * a blue-noise mask. The Gaussian wraps, so the result tiles seamlessly.
  *
  * Full void-and-cluster would need an O(N^2) min/max search per placement; this
- * converges to the same spectral shape in O(N) per iteration. Measured on the
- * output: radially averaged power below r=8 sits at ~1.3% of the high-frequency
- * plateau, and the lag-1 autocorrelation is about -0.24 (white noise is 0).
+ * converges to the same spectral shape in O(N) per iteration, in about 20 ms.
+ * Measured on the grain as it lands in the final 8-bit frame: radially averaged
+ * power below r=8 sits at ~2% of the high-frequency plateau, and the lag-1
+ * autocorrelation is -0.23 in both axes (white noise measures 0.00).
  */
 function generateBlueNoise(size: number): Uint8Array {
   const n = size * size;
@@ -393,7 +396,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 	float d = pow(min(x, 1.0), 0.45454545);
 
 	// Full amplitude across the midtones, tapering to the floor in the tails.
-	float w = smoothstep(0.0, 0.35, d) * smoothstep(1.0, 0.65, d);
+	// (smoothstep with edge0 > edge1 is undefined in GLSL, hence the 1.0 - form.)
+	float w = smoothstep(0.0, 0.35, d) * (1.0 - smoothstep(0.65, 1.0, d));
 	float a = amplitude * mix(floorRatio, 1.0, w);
 
 	// Display delta -> relative linear delta through the proxy's log slope.
@@ -570,6 +574,8 @@ export function createPostFX(opts: PostFXOptions): PostFX {
 
   const blueNoise = createBlueNoiseTexture();
   const grainEffect = createGrainEffect(blueNoise);
+  const grainOffset = grainEffect.uniforms.get('noiseOffset') as Uniform;
+  const grainExposure = grainEffect.uniforms.get('exposure') as Uniform;
 
   const toneMappingEffect = new ToneMappingEffect({
     mode: toneMappingModeFor(renderer.toneMapping),
@@ -645,10 +651,13 @@ export function createPostFX(opts: PostFXOptions): PostFX {
     from.worldFocusRange = current.worldFocusRange;
     from.bokehScale = current.bokehScale;
     target = { ...next };
-    transitionMs = immediate ? FOCUS_TRANSITION_MS : 0;
     if (immediate) {
+      // Park the clock at the end of the ease rather than special-casing it.
+      transitionMs = FOCUS_TRANSITION_MS;
       current.worldFocusRange = target.worldFocusRange;
       current.bokehScale = target.bokehScale;
+    } else {
+      transitionMs = 0;
     }
   }
 
@@ -718,12 +727,12 @@ export function createPostFX(opts: PostFXOptions): PostFX {
         toneMappingSource = renderer.toneMapping;
         toneMappingEffect.mode = toneMappingModeFor(toneMappingSource);
       }
-      grainEffect.uniforms.get('exposure')!.value = renderer.toneMappingExposure;
+      grainExposure.value = renderer.toneMappingExposure;
 
       // Reduced motion freezes the grain on one arrangement rather than turning
       // it off: the texture stays, the movement goes (§9 item 18's spirit).
       if (!reducedMotion) frame++;
-      grainEffect.uniforms.get('noiseOffset')!.value = r2Offset(frame, noiseOffset);
+      grainOffset.value = r2Offset(frame, noiseOffset);
 
       updateFocusDistance();
       advanceFocus(dtMs);

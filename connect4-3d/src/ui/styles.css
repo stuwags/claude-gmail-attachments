@@ -24,9 +24,9 @@
   --c4-ink-dim: #9ba0a6;
 
   /* Ink-tinted surfaces. No new hue: these are the ink colour at low alpha. */
-  --c4-surface: rgba(242, 241, 238, 0.06);
+  --c4-surface: rgba(242, 241, 238, 0.04);
   --c4-surface-hover: rgba(242, 241, 238, 0.1);
-  --c4-surface-on: rgba(242, 241, 238, 0.14);
+  --c4-surface-on: rgba(242, 241, 238, 0.16);
   --c4-hairline: rgba(255, 255, 255, 0.08);
   --c4-hairline-lit: rgba(255, 255, 255, 0.14);
 

@@ -471,6 +471,10 @@ export function createContactShadow(): Mesh {
       // three's MultiplyBlending ignores `opacity`.
       blending: MultiplyBlending,
       transparent: true,
+      // three's MultiplyBlending sets src = ZERO, dst = SRC_COLOR, which is only
+      // a correct multiply if the source is already premultiplied; without this
+      // flag the renderer warns and the decal's alpha is applied twice.
+      premultipliedAlpha: true,
       depthWrite: false,
       toneMapped: false,
     }),

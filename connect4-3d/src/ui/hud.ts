@@ -16,7 +16,7 @@
  * covers the board is the settings scrim, and only while the sheet is open.
  */
 
-import { COLS, Player, other } from '../engine/types';
+import { COLS, Player } from '../engine/types';
 import type { Difficulty } from '../engine/types';
 import type { CoachMode } from '../render/effects/types';
 import type { QualityTier } from '../render/api';
@@ -38,8 +38,8 @@ const COACH_FOR: Record<Difficulty, CoachMode> = { easy: 'full', medium: 'hints'
 
 const COACH_NOTE: Record<CoachMode, string> = {
   off: 'No marks on the board.',
-  hints: 'Marks the lines that can be won or lost this turn.',
-  full: 'Also shows the shapes as they build.',
+  hints: "Marks this turn's live threats.",
+  full: 'Also shows shapes as they form.',
 };
 
 const COACH_LEVEL: Record<CoachMode, number> = { off: 0, hints: 1, full: 2 };
@@ -48,8 +48,8 @@ const COACH_CYCLE: Record<CoachMode, CoachMode> = { off: 'hints', hints: 'full',
 
 const DIFFICULTIES: readonly SegItem<Difficulty>[] = [
   { value: 'easy', label: 'Easy', desc: 'Coach on. Teaches a child to spot threats.' },
-  { value: 'medium', label: 'Medium', desc: 'Steady. Punishes an obvious mistake.' },
-  { value: 'hard', label: 'Hard', desc: 'Searches deep. It misses nothing.' },
+  { value: 'medium', label: 'Medium', desc: 'Steady. It punishes slips.' },
+  { value: 'hard', label: 'Hard', desc: 'Deep search. Misses nothing.' },
 ];
 
 const COACH_MODES: readonly SegItem<CoachMode>[] = [
@@ -218,7 +218,8 @@ export function createHud(): Hud {
   let sheetOpen = false;
   let bannerVisible = false;
   let lastFocus: HTMLElement | null = null;
-  let selected: number | null = null;
+  /** Keyboard aim, mirroring `game/input.ts`, which also starts on the centre column. */
+  let selected = 3;
   let spoken = '';
 
   /* ---------------- structure ---------------- */
@@ -274,8 +275,11 @@ export function createHud(): Hud {
 
   // Bottom centre, 52pt (§8.3). Deliberately not interactive, so a click here
   // lands on the board behind it.
+  // Left in the accessibility tree on purpose: the live region announces the
+  // turn as it changes, and this is the same text sitting still for a screen
+  // reader to come back to. It is not itself a live region, so nothing is said
+  // twice.
   const capsule = el('div', 'c4-capsule c4-panel c4-play__capsule c4-fade');
-  capsule.setAttribute('aria-hidden', 'true');
   const capsuleBar = el('span', 'c4-capsule__bar');
   const capsuleTurn = el('span', 'c4-capsule__turn c4-t-headline', '');
   const capsuleAdvice = el('span', 'c4-capsule__advice c4-t-caption', '');
@@ -319,7 +323,7 @@ export function createHud(): Hud {
   const menuOpponent = segmented<'ai' | 'human'>(
     'Opponent',
     [
-      { value: 'ai', label: 'The computer' },
+      { value: 'ai', label: 'Computer' },
       { value: 'human', label: 'A friend' },
     ],
     'row',
@@ -435,7 +439,9 @@ export function createHud(): Hud {
   undoBtn.addEventListener('click', () => cb?.onUndo());
   const restartBtn = actionButton('Restart');
   restartBtn.addEventListener('click', () => {
-    closeSheet(false);
+    // Restart leaves the player on the board, so focus goes back where the
+    // sheet was opened from rather than falling to the document.
+    closeSheet();
     cb?.onRestart();
   });
   const menuBtn = actionButton('Back to the title');
@@ -489,6 +495,7 @@ export function createHud(): Hud {
   const againBtn = actionButton('Play again');
   againBtn.addEventListener('click', () => {
     hideBannerInternal();
+    settingsBtn.focus();
     cb?.onRestart();
   });
   const titleBtn = actionButton('Title');
@@ -520,6 +527,7 @@ export function createHud(): Hud {
     setHidden(scrim, false);
     setHidden(sheet, false);
     syncSheet();
+    syncPlay();
     sheetClose.focus();
     say('Settings.');
   }
@@ -530,6 +538,7 @@ export function createHud(): Hud {
     setAttr(settingsBtn, 'aria-expanded', 'false');
     setHidden(scrim, true);
     setHidden(sheet, true);
+    syncPlay();
     if (restoreFocus) (lastFocus ?? settingsBtn).focus();
     lastFocus = null;
   }
@@ -542,11 +551,20 @@ export function createHud(): Hud {
   }
 
   /**
-   * The Easy-mode advisory. `urgentColumns` is read as the columns the player
-   * to move must answer, i.e. the *opponent's* immediate wins — the reading
-   * that produces the copy in the UX spec ("Petrol can win in column 4 —
-   * block it."). Indices are the engine's 0-based `col 0..6`; the chrome shows
-   * them 1-based so they match the number keys.
+   * The Easy-mode advisory line.
+   *
+   * The wording is deliberately about the column rather than about a player.
+   * `GameController.snapshot()` fills `urgentColumns` with the union of the
+   * threat report's `blockingMoves` and `winningMoves`, so a column in this
+   * list is one where *somebody* wins this turn and the chrome cannot tell
+   * which. Naming the wrong player would teach a child to block a threat that
+   * is really their own win, so the line points at the column and lets the
+   * board overlay (§7.2, which draws the ghost in its owner's colour) say
+   * whose it is. If the controller ever narrows this field to blocks only, the
+   * sharper "Petrol can win in column 4 — block it." becomes available here.
+   *
+   * Indices are the engine's 0-based `col 0..6`; the chrome shows them 1-based
+   * so they line up with the number keys.
    */
   function advisory(s: GameSnapshot): string {
     if (s.difficulty !== 'easy' || s.coachMode === 'off') return '';
@@ -555,11 +573,10 @@ export function createHud(): Hud {
       (a, b) => a - b,
     );
     if (cols.length === 0) return '';
-    const threat = nameOf(other(s.toMove));
     const shown = cols.map((c) => String(c + 1));
-    if (shown.length === 1) return `${threat} can win in column ${shown[0]} — block it.`;
+    if (shown.length === 1) return `Column ${shown[0]} can win the game this turn — look there.`;
     const last = shown.pop() as string;
-    return `${threat} can win in columns ${shown.join(', ')} and ${last}.`;
+    return `Columns ${shown.join(', ')} and ${last} can win the game this turn.`;
   }
 
   function turnLine(s: GameSnapshot): string {
@@ -587,6 +604,12 @@ export function createHud(): Hud {
     if (!s) return;
     const inMatch = s.phase !== 'menu';
     setHidden(play, !inMatch);
+    // The sheet is modal: keep the chrome visible behind it but out of the tab
+    // order and the accessibility tree.
+    if (inMatch && sheetOpen) {
+      setAttr(play, 'inert', '');
+      setAttr(play, 'aria-hidden', 'true');
+    }
 
     setText(coachChipText, COACH_LABEL[s.coachMode]);
     coachChip.style.setProperty('--c4-accent', glowOf(s.humanPlayer));
@@ -639,17 +662,31 @@ export function createHud(): Hud {
     );
   }
 
-  /* ---------------- keyboard (§ Mac) ---------------- */
+  /* ---------------- keyboard ---------------- */
 
-  function setSelection(col: number | null, announce: boolean): void {
+  /**
+   * Keys that must not reach the board while the chrome is modal over it.
+   * `game/input.ts` listens on `window`; this handler is on `document`, so it
+   * sees every key first and can stop the ones the board should not act on.
+   */
+  const BOARD_KEYS = new Set([
+    '1', '2', '3', '4', '5', '6', '7',
+    'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+    'Enter', ' ', 'u', 'U', 'r', 'R',
+  ]);
+
+  const inControl = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest('button, input, select, textarea') !== null;
+
+  function setSelection(col: number, announce: boolean): void {
     selected = col;
     hud.dispatchEvent(
       new CustomEvent(COLUMN_SELECT_EVENT, { detail: { column: col }, bubbles: true }),
     );
-    if (announce && col !== null) say(`Column ${col + 1}.`);
+    if (announce) say(`Column ${col + 1}.`);
   }
 
-  function dropSelected(col: number): void {
+  function emitDrop(col: number): void {
     if (!snap || snap.phase !== 'playing') return;
     selected = col;
     hud.dispatchEvent(
@@ -660,60 +697,76 @@ export function createHud(): Hud {
     );
   }
 
+  /**
+   * The Mac keyboard model. Two kinds of key, handled differently on purpose.
+   *
+   * Escape, U and R map onto `HudCallbacks`, so the HUD serves them itself and
+   * claims the event (`stopPropagation`) — otherwise `game/input.ts`, which
+   * binds the same shortcuts on `window`, would undo twice on one press.
+   *
+   * 1-7, the arrows and Enter are board input, which the game controller owns
+   * (the same rule that keeps pointer input off the HUD). The HUD mirrors them
+   * — same initial column, same clamp — so it can announce the aim to a screen
+   * reader and report the intent as `c4:column-*`, and lets the event through
+   * for the controller to act on. Wire those two events only if you also drop
+   * the keyboard block in `game/input.ts`, or the disc will fall twice.
+   */
   function onKeyDown(ev: KeyboardEvent): void {
     if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey) return;
 
     if (ev.key === 'Escape') {
       if (sheetOpen) {
         ev.preventDefault();
+        ev.stopPropagation();
         closeSheet();
       } else if (snap && snap.phase !== 'menu') {
         ev.preventDefault();
+        ev.stopPropagation();
         cb?.onOpenMenu();
       }
       return;
     }
 
-    if (sheetOpen || !snap || snap.phase === 'menu') return;
-
-    // A focused control keeps Enter, Space and the arrows; the shortcuts that
-    // cannot collide with a button still work from anywhere.
-    const target = ev.target;
-    const inControl =
-      target instanceof Element && target.closest('button, input, select, textarea') !== null;
+    // Modal states: the settings sheet and the title screen. Swallow board keys
+    // so nothing drops behind the panel. Keys aimed at a focused control are
+    // left alone — the browser needs Enter and Space to activate a button.
+    if (sheetOpen || !snap || snap.phase === 'menu') {
+      if (!inControl(ev.target) && BOARD_KEYS.has(ev.key)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      return;
+    }
 
     if (ev.key === 'u' || ev.key === 'U') {
-      if (snap.canUndo) {
-        ev.preventDefault();
-        cb?.onUndo();
-      }
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (snap.canUndo) cb?.onUndo();
+      else say('Nothing to undo.');
       return;
     }
     if (ev.key === 'r' || ev.key === 'R') {
       ev.preventDefault();
+      ev.stopPropagation();
       cb?.onRestart();
       return;
     }
+
+    if (inControl(ev.target)) return;
+
     if (ev.key >= '1' && ev.key <= '7') {
       const col = Number(ev.key) - 1;
-      ev.preventDefault();
       setSelection(col, false);
-      dropSelected(col);
+      emitDrop(col);
       return;
     }
-
-    if (inControl) return;
-
     if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-      ev.preventDefault();
       const step = ev.key === 'ArrowRight' ? 1 : -1;
-      const from = selected ?? (step > 0 ? -1 : COLS);
-      setSelection(Math.min(COLS - 1, Math.max(0, from + step)), true);
+      setSelection(Math.min(COLS - 1, Math.max(0, selected + step)), true);
       return;
     }
-    if (ev.key === 'Enter' && selected !== null) {
-      ev.preventDefault();
-      dropSelected(selected);
+    if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'ArrowDown') {
+      emitDrop(selected);
     }
   }
 
@@ -730,10 +783,11 @@ export function createHud(): Hud {
     update(snapshot: GameSnapshot): void {
       const prev = snap;
       snap = snapshot;
+      const enteringMenu = snapshot.phase === 'menu' && (!prev || prev.phase !== 'menu');
 
       // The title screen seeds itself from live state on entry only, so
       // repeated menu snapshots never fight the player's selections.
-      if (snapshot.phase === 'menu' && (!prev || prev.phase !== 'menu')) {
+      if (enteringMenu) {
         draft.difficulty = snapshot.difficulty;
         draft.coachMode = snapshot.coachMode;
         draft.humanPlayer = snapshot.humanPlayer;
@@ -744,7 +798,6 @@ export function createHud(): Hud {
         setText(menuCoachNote, COACH_NOTE[draft.coachMode]);
         menuOpponent.set(draft.vsAi ? 'ai' : 'human');
         menuColour.set(tintOf(draft.humanPlayer));
-        if (mounted && !menuPanel.contains(document.activeElement)) menuPanel.focus();
       }
 
       if (snapshot.phase !== 'over' && bannerVisible) hideBannerInternal();
@@ -753,6 +806,12 @@ export function createHud(): Hud {
       syncMenu();
       syncPlay();
       if (sheetOpen) syncSheet();
+
+      // After syncMenu, never before: the panel is inert and invisible until
+      // then, and neither state can take focus.
+      if (enteringMenu && mounted && !menuPanel.contains(document.activeElement)) {
+        menuPanel.focus();
+      }
       say(announcement(snapshot));
     },
 
