@@ -341,7 +341,16 @@ class CoachOverlayImpl implements CoachOverlay {
     const chosen = this.selectWithinBudget(classified, inspectedCell);
 
     let filamentIndex = 0;
-    const ghostCells = new Map<string, { colour: Color; classes: ThreatClass[] }>();
+    /**
+     * Ghosts are budgeted per THREAT, not per cell.
+     *
+     * An open three has two completion cells and is still one thing to see; if
+     * the cap counted cells it could render one half of an open three and drop
+     * the other, which teaches a child the exact opposite of the lesson — that
+     * there is one place to block, when there are two and blocking either loses.
+     * So a threat's gaps are admitted or refused together.
+     */
+    const ghostGroups: { cells: Coord[]; colour: Color }[] = [];
 
     for (const item of chosen) {
       const classA = item.cls === 'A1' || item.cls === 'A2' || item.cls === 'A3';
@@ -356,23 +365,29 @@ class CoachOverlayImpl implements CoachOverlay {
       this.lit++;
 
       if (item.cls === 'A1' || item.cls === 'A2') {
-        for (const gap of item.threat.immediateGaps) {
-          const key = `${gap.col},${gap.row}`;
-          const entry = ghostCells.get(key);
-          if (entry) entry.classes.push(item.cls);
-          else ghostCells.set(key, { colour: GLOW[item.threat.owner], classes: [item.cls] });
-        }
+        ghostGroups.push({
+          cells: item.threat.immediateGaps.map((g) => ({ col: g.col, row: g.row })),
+          colour: GLOW[item.threat.owner],
+        });
       }
     }
 
-    let ghostIndex = 0;
-    for (const [key, entry] of ghostCells) {
-      if (ghostIndex >= MAX_GHOSTS) break;
-      const [col, row] = key.split(',').map(Number);
-      this.placeGhost(col, row, entry.colour, ghostIndex);
-      this.placeRing(col, row, entry.colour, true, ghostIndex);
-      ghostIndex++;
-      this.lit++;
+    // `chosen` is already in priority order, so taking whole groups off the
+    // front keeps the most urgent threats and drops the least.
+    const drawn = new Set<string>();
+    let ghostUnits = 0;
+    for (const group of ghostGroups) {
+      if (ghostUnits >= MAX_GHOSTS) break;
+      for (const cell of group.cells) {
+        const key = `${cell.col},${cell.row}`;
+        // Two threats can complete in the same cell; draw it once.
+        if (drawn.has(key)) continue;
+        drawn.add(key);
+        this.placeGhost(cell.col, cell.row, group.colour, drawn.size);
+        this.placeRing(cell.col, cell.row, group.colour, true, drawn.size);
+        this.lit++;
+      }
+      ghostUnits++;
     }
   }
 

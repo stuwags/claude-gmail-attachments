@@ -324,7 +324,10 @@ export function createGhostMaterial(reducedMotion: boolean): GhostMaterial {
 
 export interface MaterialLibrary {
   disc: MeshPhysicalMaterial;
+  /** Front sheet: near-clear, because every disc is seen through it. */
   acrylic: MeshPhysicalMaterial;
+  /** Back sheet: mostly opaque, so the cavity has a surface rather than a void. */
+  acrylicBack: MeshPhysicalMaterial;
   aluminium: MeshPhysicalMaterial;
   basalt: MeshPhysicalMaterial;
   rimStroke: MeshBasicMaterial;
@@ -414,6 +417,40 @@ export function createMaterials(
   // haze the bible wants turns into frosting.
   acrylic.normalScale = new Vector2(0.08, 0.08);
 
+  /* ---- acrylic, back sheet ---- */
+
+  /**
+   * The back sheet gets its own material, and it is the difference between a
+   * board and a hole.
+   *
+   * Sharing the front sheet's near-clear transmission made the back panel a
+   * window: an empty cell looked straight through it into the dark studio void
+   * behind the board, so the whole interior read as a black rectangle and a
+   * disc in the top rows had nothing to sit against. A real set's back sheet is
+   * a surface you can see — it catches the key and gives the cavity a floor.
+   *
+   * So this one is a mostly-opaque smoked sheet: enough transmission to stay
+   * acrylic rather than paint, enough diffuse roughness to catch the key across
+   * its whole width, and the same glossy clearcoat top so it still reads as the
+   * same material as the front.
+   */
+  const acrylicBack = new MeshPhysicalMaterial({
+    color: new Color(PALETTE.smoke).multiplyScalar(0.32),
+    transmission: 0.18,
+    thickness: 0.006,
+    attenuationColor: new Color(PALETTE.smoke),
+    attenuationDistance: 0.018,
+    roughness: 0.22,
+    metalness: 0.0,
+    ior: 1.49,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.08,
+    normalMap: acrylicNormal,
+    envMapIntensity: 0.7,
+    side: FrontSide,
+  });
+  acrylicBack.normalScale = new Vector2(0.08, 0.08);
+
   /* ---- aluminium ---- */
 
   const blast = beadBlast();
@@ -482,6 +519,7 @@ export function createMaterials(
   return {
     disc,
     acrylic,
+    acrylicBack,
     aluminium,
     basalt,
     rimStroke,
@@ -495,6 +533,10 @@ export function createMaterials(
       // moves into the albedo to keep the panels the same colour on both tiers.
       acrylic.color.setHex(tierA ? 0xffffff : PALETTE.smoke);
       acrylic.needsUpdate = true;
+      // The back sheet is already mostly opaque, so Tier B only has to drop the
+      // little transmission it has rather than restyle it.
+      acrylicBack.transmission = tierA ? 0.18 : 0.0;
+      acrylicBack.needsUpdate = true;
     },
     dispose() {
       for (const t of textures) t.dispose();

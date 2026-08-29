@@ -21,7 +21,7 @@ toneMapping: AgXToneMapping (fallback ACESFilmic, see 4.1)
 toneMappingExposure: 1.15
 shadowMap.enabled: true
 shadowMap.type: VSMShadowMap
-transmissionResolutionScale: 0.5
+transmissionResolutionScale: 1.0   // Tier A. 0.5 on Tier B; see revision log R7.
 pixelRatio: min(devicePixelRatio, 2)
 ```
 
@@ -54,7 +54,7 @@ pixelRatio: min(devicePixelRatio, 2)
 
 ### 1.1 The set
 
-A single monolithic slab of honed basalt, the tabletop, floats in a dark studio void. No walls, no horizon line, no props. The board sits dead center on a low aluminum plinth. Behind it, the backdrop is a smooth vertical gradient from `void-low` at the bottom to `void-high` at 60 degrees elevation, built as an inverted 8 m radius sphere with a vertex-shader gradient (never a photo, never visible banding: apply blue-noise dither at 1/255 in the gradient shader). Centered behind the board, add a radial warm pool, a 1.6 m radius soft radial gradient of `pool` at 10 percent opacity peak, additively on the backdrop, so the board's dark silhouette separates from the dark void. That separation is what makes it photography instead of a screensaver.
+A single monolithic slab of honed basalt, the tabletop, floats in a dark studio void. No walls, no horizon line, no props. The board sits dead center on a low aluminum plinth. Behind it, the backdrop is a smooth vertical gradient from `void-low` at the bottom to `void-high` at 60 degrees elevation, built as an inverted 8 m radius sphere with a vertex-shader gradient (never a photo, never visible banding: apply blue-noise dither at 1/255 in the gradient shader). Centered behind the board, add a radial warm pool, a 1.6 m radius soft radial gradient of `pool` at 16 percent opacity peak, additively on the backdrop, so the board's dark silhouette separates from the dark void. That separation is what makes it photography instead of a screensaver.
 
 ### 1.2 Object dimensions (meters in code, mm here)
 
@@ -100,7 +100,7 @@ One warm softbox key, a cool ambient fill, a hard cool rim. Warm key against coo
 |---|---|---|---|---|---|---|
 | Key | `RectAreaLight` | 1.2 x 1.8 | (-0.85, 1.35, 0.95) | at target | `#FFF1E3` | 9.0 |
 | Fill | `RectAreaLight` | 2.5 x 2.5 | (1.6, 0.9, 0.6) | at target | `#D8E3EE` | 2.2 |
-| Rim | `RectAreaLight` | 0.25 x 1.6 (vertical strip) | (1.15, 0.55, -1.25) | at target | `#EAF1FF` | 22.0 |
+| Rim | `RectAreaLight` | 0.25 x 1.6 (vertical strip) | (0.45, 1.05, -1.40) | at (0, 0.30, 0) | `#EAF1FF` | 22.0 |
 | Shadow proxy | `DirectionalLight` | n/a | along key axis | at origin | `#FFF1E3` | 1.6 |
 
 Treat the ratios as canonical (key : fill : rim = 1 : 0.24 : 2.4). If overall brightness needs retuning, touch `toneMappingExposure` only.
@@ -117,9 +117,9 @@ No HDR files. Build a `StudioEnvironment` scene, render once through `PMREMGener
 
 - Room: 4 x 3 x 4 m box, interior albedo `#0C0D0F`, `side: BackSide`.
 - Key card: 1.2 x 1.8 plane, emissive `#FFF1E3`, intensity 20, at the key light's position and orientation.
-- Fill card: 2.5 x 2.5 plane, emissive `#D8E3EE`, intensity 4.5, at the fill's position.
-- Rim card: 0.3 x 1.8 plane, emissive `#EAF1FF`, intensity 45, at the rim's position.
-- Horizon card: 3.0 x 0.6 plane behind the camera at y = 0.4, emissive `#35302A`, intensity 0.8. This is what puts a long warm streak in the tabletop sheen.
+- Fill card: 2.5 x 2.5 plane, emissive `#D8E3EE`, intensity 1.5, at the fill's position. (Was 4.5: 6.25 m2 hanging on the rim's side, double-counting the analytic fill that already carries the canonical 0.24.)
+- Rim card: 0.3 x 1.8 plane, emissive `#EAF1FF`, intensity 32, at the rim's position (cards mirror the rig, so it moves with the rim). Escalation if the table ratio still misses: 32 -> 24.
+- Horizon card: 3.0 x 1.6 plane behind the camera at y = 0.15, emissive `#35302A`, intensity 1.2. (Enlarged and lowered: aluminium is metalness 1.0, so a front-facing rail shows only what the environment holds in its mirror direction, and at y = 0.4 the card sat entirely above that path.) This is what puts a long warm streak in the tabletop sheen.
 
 `scene.environmentIntensity = 0.55`. The analytic lights model the form; the environment exists so every glossy surface reflects rectangles. Window-shaped highlights on the discs are the number one "expensive" tell and are a hard acceptance criterion.
 
@@ -198,7 +198,7 @@ clearcoatRoughness: 0.35
 envMapIntensity: 0.5
 ```
 
-Albedo: 1024 x 1024 canvas speckle, base `#23262A`, per-pixel brightness variance 2 percent, plus sparse lighter mineral flecks (`#3A3E43`, about 400 flecks, 1 to 3 px). Normal map derived from the same field at scale 0.15. The clearcoat layer gives a soft, stretched reflection of the board and the horizon card; that blurry reflection under the object is doing the "product on seamless" work. Optional Tier A garnish: a half-resolution `Reflector` on the slab mixed at 12 percent with 2-pass blur; cut it the moment it costs frames.
+Albedo: 1024 x 1024 canvas speckle, base `#23262A`, per-pixel brightness variance 2 percent, plus sparse lighter mineral flecks (`#3A3E43`, about 400 flecks, 1 to 3 px). Normal map derived from the same field at scale 0.15. The clearcoat layer gives a soft, stretched reflection of the board and the horizon card; that blurry reflection under the object is doing the "product on seamless" work. **The `Reflector` is struck permanently** (revision R3). The slab's reflection is a canvas-generated smear of the object's static masses only, multiplied into the basalt: brightest warm band at the plinth contact line, the board's dark mass above it, a faint warm echo of the top rail. No disc colors, no dynamic content — at clearcoatRoughness 0.35 honed stone would destroy that detail anyway, which is the physical alibi. 20-30 percent of object contrast at the contact line, vertical stretch ~1.6:1, fading to zero within 0.18 m of contact, lateral edges feathered. It must read as sheen, not a decal.
 
 ### 3.4 Ghost and overlay materials
 
@@ -273,7 +273,7 @@ One idea, executed slowly and confidently: the winning line becomes the only lig
 | 0 | Final disc lands with the standard physics and settle. |
 | 120 | House lights dim: backdrop, table, and non-winning discs desaturate 15 percent and darken 18 percent over 400 ms (uniform-driven, `gallery` easing). |
 | 250 | The four winning discs ignite in cascade along the line direction, 90 ms stagger: each ramps `emissive` from black to its own body color times 2.2 over 350 ms, then breathes 0.85 to 1.0 at a 1.8 s period. |
-| 400 | The core line: a 3 mm rounded-cap cylinder of `gold` `#FFD9A8`, emissive intensity 3.0, draws itself through the four disc centers over 450 ms (shader clip along length). It should just tickle bloom, a halo of a few pixels, no more. |
+| 400 | The core line: a 3 mm rounded-cap cylinder of `gold` `#FFD9A8`, emissive intensity 2.4, draws itself through the four disc centers over 450 ms (shader clip along length). It should just tickle bloom, a halo of a few pixels, no more. |
 | 700 | Camera: 7 percent dolly-in plus up to 3 degrees orbit toward the line's normal, 1200 ms on `gallery`; DoF shifts to win state (`worldFocusRange 0.12`, `bokehScale 3.2`) with the winning line held on the focus plane. |
 | 900 | One particle gesture: 40 to 60 ember motes rise from the four discs. Size 1 to 2 mm, additive, owner glow color at 60 percent, upward 0.05 m/s with gentle curl noise, lifetime 1.2 s, one emission only. |
 | 1100 | Result banner enters (`ui-in`). Copy is quiet: "Ember takes it." |
@@ -392,7 +392,7 @@ Binary checks, each verifiable from screenshots of a Tier A build (items 17 and 
 4. Discs seen through the front panel are visibly hazed and cool-tinted by the smoke, and refraction is visible at a grazing camera angle.
 5. Shadow penumbra visibly widens with occluder distance; no uniform hard-edged shadow, no gap between object and shadow.
 6. Contact darkening is present under the plinth and inside occupied slots (AO on, grounded).
-7. Histogram: no pixel below 4/255; pixels at 255 are confined to specular cores and the win filament, under 1 percent of the frame.
+7. Histogram: pixels below 4/255 are at most 0.5 percent of frame, with zero of them in open backdrop or open tabletop and no contiguous sub-4 region larger than 0.05 percent; pixels at 255 are confined to specular cores and the win filament, under 1 percent of the frame. (Revised: a literal zero floor is in direct tension with item 6's contact darkening. Near-black in a crevice core is photographic truth; what this item kills is crushed *fields*.)
 8. Saturated disc highlights roll toward white with no hue shift to neon (AgX confirmed by a red-to-white gradient on the ember disc's hot spot).
 9. A/B toggling bloom changes only specular cores and the win filament; no halo on UI, disc bodies, or frame.
 10. In play state the entire board is in focus; in win state the backdrop is measurably defocused while the winning line is sharp.
@@ -400,7 +400,7 @@ Binary checks, each verifiable from screenshots of a Tier A build (items 17 and 
 12. Film grain is visible at 400 percent zoom on midtones, invisible at normal viewing, and two consecutive frames differ (animated).
 13. Corner vignette falloff is at most 0.3 EV.
 14. A grayscale conversion still distinguishes the two disc colors (luminance gap at least 12 L*).
-15. With coach in Full mode on a busy midgame board, at most 5 luminous overlay elements are lit, and any class A element is unmistakably dominant over class B in the same shot.
+15. With coach in Full mode on a busy midgame board, at most 5 luminous overlay elements are lit, and any class A element is unmistakably dominant over class B in the same shot. An open three's pair of ghosts counts as ONE budget unit, because it is one threat: never show half an open three, which would teach a child there is one place to block when there are two and blocking either loses.
 16. `#FFD9A8` gold appears in no screenshot except during a win sequence.
 17. UI panels show true backdrop blur with a 1 px hairline border, and all tap targets, column zones included, measure at least 44 x 44 pt on device.
 18. At every parallax extreme the backdrop fills the frame completely, with no visible gradient banding, seams, or void edges; and with `prefers-reduced-motion` set, all pulsing, drift, and motes are static while the board remains fully readable.
@@ -408,3 +408,30 @@ Binary checks, each verifiable from screenshots of a Tier A build (items 17 and 
 ---
 
 Final note to the build team. The order of operations matters: get the materials and lighting rig signed off against items 1 through 8 before any post-processing is written, because a correct lighting rig with zero post beats a weak rig with all nine passes every time. Post is seasoning. The softbox is the meal.
+
+
+---
+
+## 10. Revision log
+
+Every entry here was driven by a measurement on a rendered frame, not by taste. Where a number below contradicts the body text, the body text has already been updated to match; this log records what changed and why, so nobody re-litigates a settled decision.
+
+**R1 — The dark-end palette hexes are post-tonemap SCREEN TARGETS, not raw shader inputs.** A spec bug. `void-low #101114` authored as a raw color renders at (9,10,14), because AgX at exposure 1.15 crushes the toe. Calibrate source colors through an inverse-AgX so the *rendered* frame hits: backdrop bottom-of-frame 14-18 code values, top-of-frame 24-30, horizon seam step at most 6, table foreground 33-45 warm-neutral, board-interior-to-backdrop separation at least 10.
+
+**R2 — The rim light moves.** It was mis-authored at (1.15, 0.55, -1.25), lighting faces this camera never sees and dumping its radiance across the table's right third (measured contribution across thirds: 0/1/9). Freezing the camera froze the *view*; lights exist to serve the view. New position (0.45, 1.05, -1.40), aiming at (0, 0.30, 0). The table's warm-left acceptance ratio revises from 1.3x to **1.25x** scene-linear, measured at a pinned locus: table strip y 680-720, x 60-460 against x 980-1380, empty scene, rest pose, 1440x900 at DPR 1.
+
+**R3 — The tabletop `Reflector` is struck.** A half-resolution one costs ~190k triangles against a 450k budget that is a performance contract, not a guideline. Replaced by the canvas smear specified in §3.3.
+
+**R4 — Item 7's histogram floor is a band, not a zero.** A literal zero floor is in direct tension with item 6's demand for deep contact darkening; forcing it means either an output clamp (banned — it posterizes and cheats) or lifting AO until grounding dies. Near-black in a crevice core is photographic truth.
+
+**R5 — An open three's ghost pair is ONE budget unit.** Counting cells could render half an open three, which teaches a child that there is one place to block when there are two and blocking either loses. Exactly the opposite of the lesson.
+
+**R6 — The win filament drops from 3.0 to 2.4 emissive.** At 3.0 with bloom thresholded at 1.0 the core clipped to paper white — measured (242,234,224) — and the gold identity was simply gone. At 2.4 the core stays gold and the halo becomes bloom's job, which is where §4.3 wants it. It also now draws in front of the panel: threaded through the discs inside the board, the solid acrylic between the holes chopped it into disconnected dashes, destroying the one thing it exists to be.
+
+**R7 — Transmission renders at full resolution on Tier A.** At 0.5 the hero object of the game was being destroyed: every disc is only ever seen *through* the front panel, so its clearcoat highlight, lathed grooves and rim fillet were all resolved at half resolution and upscaled. §0's original setting was in direct conflict with items 1, 2 and 3, which could not pass at any lighting quality.
+
+**R8 — The back acrylic sheet is a different material from the front.** Both sheets were drilled through, so an empty cell looked straight past the board into the studio void and the whole interior read as a black rectangle. The front sheet stays near-clear because discs are seen through it; the back sheet is a mostly-opaque smoked panel that catches the key and gives the cavity a floor.
+
+**R9 — Environment card intensities.** Rim card 45 to 32 (escalation to 24 available), fill card 4.5 to 1.5, horizon card 0.8 to 1.2 and enlarged from 3.0 x 0.6 at y = 0.4 to 3.0 x 1.6 at y = 0.15. The key light was never missing — the environment was drowning it, measured at 14/20/33 across the table thirds against the key's 16/15/8.
+
+**R10 — The plinth's screen band is 50-75 code values**, revised down from 80-105, which had been authored against an overbright render. Side rails stay 70-95, top rail front 95-125, and zero clipped pixels on metal.

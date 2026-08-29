@@ -464,7 +464,13 @@ class BoardScene implements SceneBoardView {
     mouths.receiveShadow = true;
 
     for (const z of [PANEL_BACK_Z, PANEL_FRONT_Z]) {
-      const panel = new Mesh(createPanelGeometry(z > 0), this.materials.acrylic);
+      // z > 0 is the front sheet, drilled through so the discs can be seen;
+      // the back sheet is solid and uses the opaque smoked material.
+      const isFront = z > 0;
+      const panel = new Mesh(
+        createPanelGeometry(isFront),
+        isFront ? this.materials.acrylic : this.materials.acrylicBack,
+      );
       panel.position.z = z;
       // Neither casts nor receives. Casting is obviously wrong for a sheet the
       // light passes through — but so is receiving, because three renders VSM
