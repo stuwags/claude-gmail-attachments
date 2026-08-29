@@ -1,8 +1,8 @@
 /**
- * Pointer, touch and keyboard input over the 3D board.
+ * Pointer and touch input over the 3D board.
  *
- * The DOM chrome handles its own controls; this handles the board itself,
- * which is not a DOM element and so has no hit testing of its own.
+ * The DOM chrome handles its own controls and the keyboard; this handles the
+ * board itself, which is not a DOM element and so has no hit testing of its own.
  *
  * The interaction model comes from bible §5.3: drag to aim and release to drop,
  * with a plain tap doing both at once. That works identically for a mouse (where
@@ -13,7 +13,6 @@
 import type { BoardView } from '../render/api.ts';
 import type { GameController } from './controller.ts';
 import type { AudioEngine } from './audio.ts';
-import { COLS } from '../engine/types.ts';
 
 export interface InputOptions {
   canvas: HTMLCanvasElement;
@@ -34,8 +33,6 @@ export class InputController {
   /** True between pointerdown and pointerup on the board. */
   private aiming = false;
   private activePointerId: number | null = null;
-  /** Column the keyboard selection sits on, for arrow-key play. */
-  private keyboardColumn = 3;
   private disposed = false;
 
   constructor(opts: InputOptions) {
@@ -54,7 +51,6 @@ export class InputController {
     // even with touch-action: none, and it is jarring mid-game.
     this.canvas.addEventListener('dblclick', preventDefault);
     this.canvas.addEventListener('contextmenu', preventDefault);
-    window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('blur', this.onBlur);
   }
 
@@ -68,7 +64,6 @@ export class InputController {
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('dblclick', preventDefault);
     this.canvas.removeEventListener('contextmenu', preventDefault);
-    window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('blur', this.onBlur);
   }
 
@@ -97,7 +92,6 @@ export class InputController {
     this.aiming = true;
     this.activePointerId = event.pointerId;
     this.canvas.setPointerCapture(event.pointerId);
-    this.keyboardColumn = col;
     this.controller.setHoveredColumn(col);
   };
 
@@ -116,7 +110,6 @@ export class InputController {
       return;
     }
     const col = this.view.columnAtPointer(ndc.x, ndc.y);
-    if (col !== null) this.keyboardColumn = col;
     this.controller.setHoveredColumn(col);
   };
 
@@ -160,58 +153,17 @@ export class InputController {
    * Keyboard
    * ------------------------------------------------------------------ */
 
-  private onKeyDown = (event: KeyboardEvent): void => {
-    // Never steal keys from the chrome's own controls, or Space on a focused
-    // button would both activate it and drop a disc.
-    if (isEditableTarget(event.target)) return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-
-    const key = event.key;
-
-    if (key >= '1' && key <= '7') {
-      event.preventDefault();
-      const col = Number(key) - 1;
-      this.keyboardColumn = col;
-      void this.drop(col);
-      return;
-    }
-
-    switch (key) {
-      case 'ArrowLeft':
-        event.preventDefault();
-        this.moveSelection(-1);
-        break;
-      case 'ArrowRight':
-        event.preventDefault();
-        this.moveSelection(1);
-        break;
-      case 'ArrowDown':
-      case 'Enter':
-      case ' ':
-        event.preventDefault();
-        void this.drop(this.keyboardColumn);
-        break;
-      case 'u':
-      case 'U':
-        event.preventDefault();
-        void this.controller.undo();
-        break;
-      case 'r':
-      case 'R':
-        event.preventDefault();
-        void this.controller.restart();
-        break;
-      default:
-        break;
-    }
-  };
-
-  private moveSelection(delta: number): void {
-    if (!this.controller.acceptsInput) return;
-    this.keyboardColumn = Math.min(COLS - 1, Math.max(0, this.keyboardColumn + delta));
-    this.controller.setHoveredColumn(this.keyboardColumn);
-  }
-
+  /**
+   * Keyboard board input arrives from the HUD, not from here.
+   *
+   * The HUD owns the keyboard because it owns the things a keyboard needs: a
+   * visible selected column, focus management, and the live region that
+   * announces the aim to a screen reader. Duplicating 1-7 on `window` would
+   * simply drop two discs per press. It reports the player's intent as
+   * `c4:column-select` and `c4:column-drop`, which `main.ts` routes into the
+   * same controller calls a pointer gesture makes; undo, restart and escape it
+   * serves directly through `HudCallbacks`.
+   */
   private async drop(col: number): Promise<void> {
     void this.audio.unlock();
     const played = await this.controller.playColumn(col);
@@ -220,11 +172,3 @@ export class InputController {
 }
 
 const preventDefault = (event: Event) => event.preventDefault();
-
-/** True for form controls and anything focusable that consumes typing. */
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
-}

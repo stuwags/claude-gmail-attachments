@@ -13,6 +13,12 @@ import { AiClient } from './game/ai-client.ts';
 import { GameController } from './game/controller.ts';
 import { InputController } from './game/input.ts';
 import { Player } from './engine/types.ts';
+import {
+  COLUMN_DROP_EVENT,
+  COLUMN_SELECT_EVENT,
+  type ColumnDropEvent,
+  type ColumnSelectEvent,
+} from './ui/events.ts';
 import type { QualityTier } from './render/api.ts';
 import type { CoachMode } from './render/effects/types.ts';
 import type { Difficulty } from './engine/types.ts';
@@ -66,6 +72,18 @@ async function boot(): Promise<void> {
   });
 
   const input = new InputController({ canvas, view, controller, audio, reducedMotion });
+
+  // Keyboard play is reported by the HUD, which owns the visible selection and
+  // the screen-reader announcements, and routed here into the same controller
+  // calls a pointer gesture makes. See `src/ui/events.ts`.
+  const onColumnSelect = (event: ColumnSelectEvent) =>
+    controller.setHoveredColumn(event.detail.column);
+  const onColumnDrop = (event: ColumnDropEvent) => {
+    void audio.unlock();
+    void controller.playColumn(event.detail.column);
+  };
+  document.addEventListener(COLUMN_SELECT_EVENT, onColumnSelect);
+  document.addEventListener(COLUMN_DROP_EVENT, onColumnDrop);
 
   await controller.openMenu();
 
@@ -150,6 +168,8 @@ async function boot(): Promise<void> {
   };
 
   window.addEventListener('pagehide', () => {
+    document.removeEventListener(COLUMN_SELECT_EVENT, onColumnSelect);
+    document.removeEventListener(COLUMN_DROP_EVENT, onColumnDrop);
     input.dispose();
     ai.dispose();
     audio.dispose();
