@@ -41,7 +41,7 @@ import {
   SimplexNoise,
   smoothstep,
 } from './procedural';
-import { PALETTE } from './environment';
+import { PALETTE, RIG_SCALE } from './environment';
 import type { QualityTier } from './api';
 
 /** Per-instance vec4 the outcome sequence drives: ignition, desat, darken, roughness bias. */
@@ -259,6 +259,7 @@ uniform vec3  uColour;
 uniform float uOpacity;
 uniform float uTime;
 uniform float uShimmer;
+uniform float uRigScale;
 varying vec3 vN;
 varying vec3 vV;
 varying vec2 vUvG;
@@ -269,7 +270,8 @@ void main() {
   float a = mix( 0.10, 0.45, fresnel );
   // One octave, 3 s period, ±8 %. No scanlines, no hexagons, no sci-fi.
   a *= 1.0 + uShimmer * 0.08 * sin( vUvG.x * 6.2831853 + uTime * 2.0943951 );
-  gl_FragColor = vec4( uColour, a * uOpacity );
+  // Additive and scene-referred, so it carries the rig's scale like a light.
+  gl_FragColor = vec4( uColour, a * uOpacity * uRigScale );
 }
 `;
 
@@ -287,6 +289,7 @@ export function createGhostMaterial(reducedMotion: boolean): GhostMaterial {
       uOpacity: { value: 0 },
       uTime: { value: 0 },
       uShimmer: { value: reducedMotion ? 0 : 1 },
+      uRigScale: { value: RIG_SCALE },
     },
     vertexShader: GHOST_VERT,
     fragmentShader: GHOST_FRAG,
@@ -410,8 +413,14 @@ export function createMaterials(
   const blast = beadBlast();
   const alNormal = keep(blast.normalMap);
   const alRough = keep(blast.roughnessMap);
-  alNormal.repeat.set(9, 9);
-  alRough.repeat.set(9, 9);
+  // Extrude cap UVs are the shape's own coordinates, i.e. *metres*. At repeat 9
+  // one tile covered 111 mm of rail, putting the blast texture's 205-cycle
+  // field at a 0.54 mm feature — two screen pixels, which reads as speckle
+  // rather than as a finish. Repeat 24 gives a 41 mm tile and a 0.20 mm
+  // feature, which is both the bible's number and comfortably sub-pixel at
+  // this camera distance.
+  alNormal.repeat.set(24, 24);
+  alRough.repeat.set(24, 24);
 
   const aluminium = new MeshPhysicalMaterial({
     color: PALETTE.starlight,
@@ -423,7 +432,10 @@ export function createMaterials(
     envMapIntensity: 1.0,
     side: FrontSide,
   });
-  aluminium.normalScale = new Vector2(0.35, 0.35);
+  // A bead-blasted finish scatters; it does not corrugate. At sub-pixel feature
+  // size the normal map's job is to take the hard edge off a highlight, not to
+  // be seen.
+  aluminium.normalScale = new Vector2(0.2, 0.2);
 
   /* ---- basalt ---- */
 
@@ -551,8 +563,11 @@ function injectDiscTreatment(material: MeshPhysicalMaterial): void {
       )
       .replace(
         '#include <emissivemap_fragment>',
+        // Bible §6.1's "body colour times 2.2", expressed in the scene-referred
+        // units the rest of the rig uses so an ignited disc sits the same
+        // distance above its neighbours whatever the rig scale is.
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vColor.rgb * vTreat.x * 2.2;`,
+        totalEmissiveRadiance += vColor.rgb * vTreat.x * ${(2.2 * RIG_SCALE).toFixed(4)};`,
       );
   };
   // Static injection, so one cache key for every compile of this material.

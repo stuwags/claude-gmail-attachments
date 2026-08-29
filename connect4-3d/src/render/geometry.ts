@@ -409,7 +409,11 @@ export function createFeedMouthGeometry(): BufferGeometry {
   for (let c = 0; c < COLS; c++) {
     const x = columnX(c);
     const rings = [
-      { y: top - FEED_CHAMFER_DEPTH - 0.006, hz: SLOT_HALF_Z, r: SLOT_CORNER },
+      // The collar stops flush with the underside of the rail. Running it on
+      // down into the cavity put a lit aluminium tube behind the top row of
+      // apertures, which read through the acrylic as a bright bar across the
+      // head of the playfield — a real set has nothing there but the gap.
+      { y: top - RAIL_SECTION, hz: SLOT_HALF_Z, r: SLOT_CORNER },
       { y: top - FEED_CHAMFER_DEPTH, hz: SLOT_HALF_Z, r: SLOT_CORNER },
       { y: top, hz: SLOT_HALF_Z + FLARE, r: SLOT_CORNER + FLARE },
     ].map((ring) =>

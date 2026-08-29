@@ -38,7 +38,7 @@ import {
 } from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
-import { mulberry32 } from './procedural';
+import { clamp01, mulberry32 } from './procedural';
 import { CAMERA_TARGET, PLINTH_DEPTH, PLINTH_WIDTH } from './layout';
 
 /* ------------------------------------------------------------------ *
@@ -61,6 +61,35 @@ export const PALETTE = {
   ink: 0xf2f1ee,
   inkDim: 0x9ba0a6,
 } as const;
+
+/**
+ * Scene-referred scale for everything that emits light.
+ *
+ * The bible's rig (§2.1) and its exposure (§0) are internally inconsistent with
+ * its bloom threshold (§4.3, `luminanceThreshold 1.0`, "HDR-only, nothing below
+ * 1.0 ever blooms"). Measured, the rig as written puts ~11 irradiance on the
+ * board, and an ember disc — a 0.59-albedo surface — comes back at a radiance of
+ * about 1.8. That is a mid-tone, not a highlight, and bloom was picking up every
+ * disc body: §9 item 9 fails on sight, and the halo desaturated the discs into
+ * pale salmon and washed the lathed grooves out of them entirely.
+ *
+ * Tone mapping happens *after* bloom, so exposure cannot fix this — only the
+ * scene-referred scale can. Scaling every emitter by this factor and dividing
+ * the exposure by it leaves the tone-mapped image bit-for-bit unchanged (the
+ * chain's vignette, aberration, AO and DoF are all scale-invariant, and its
+ * grain is expressed relative to the exposed signal), while moving diffuse
+ * radiance back under 1.0 where it belongs. Everything in this codebase that
+ * authors an absolute radiance — the backdrop, the ghost, the hover strokes,
+ * the disc ignition emissive — is scaled by this same constant.
+ *
+ * Integrators: values authored in scene-referred units elsewhere (the coach's
+ * additive filaments, the win filament's emissive) are unaffected by the scale
+ * but appear 1/0.35 brighter after exposure, and need recalibrating against it.
+ */
+export const RIG_SCALE = 0.35;
+
+/** Display exposure, after the rig re-normalisation above is divided out. */
+export const TONE_EXPOSURE = 0.68;
 
 const KEY_COLOR = 0xfff1e3;
 const FILL_COLOR = 0xd8e3ee;
@@ -245,19 +274,19 @@ export function createLightRig(): LightRig {
   const group = new Group();
   group.name = 'light-rig';
 
-  const key = new RectAreaLight(KEY_COLOR, 9.0, 1.2, 1.8);
+  const key = new RectAreaLight(KEY_COLOR, 9.0 * RIG_SCALE, 1.2, 1.8);
   key.position.set(-0.85, 1.35, 0.95);
   key.lookAt(TARGET);
 
-  const fill = new RectAreaLight(FILL_COLOR, 2.2, 2.5, 2.5);
+  const fill = new RectAreaLight(FILL_COLOR, 2.2 * RIG_SCALE, 2.5, 2.5);
   fill.position.set(1.6, 0.9, 0.6);
   fill.lookAt(TARGET);
 
-  const rim = new RectAreaLight(RIM_COLOR, 22.0, 0.25, 1.6);
+  const rim = new RectAreaLight(RIM_COLOR, 22.0 * RIG_SCALE, 0.25, 1.6);
   rim.position.set(1.15, 0.55, -1.25);
   rim.lookAt(TARGET);
 
-  const shadow = new DirectionalLight(KEY_COLOR, 1.6);
+  const shadow = new DirectionalLight(KEY_COLOR, 1.6 * RIG_SCALE);
   shadow.position.copy(key.position);
   shadow.target.position.copy(TARGET);
   shadow.castShadow = true;
@@ -324,6 +353,15 @@ export interface Backdrop {
 
 const BACKDROP_RADIUS = 8;
 
+/**
+ * Pre-compensation that puts the bible's display-referred backdrop colours back
+ * where they belong after AgX and the exposure, times the rig scale (the
+ * backdrop is unlit, so it has to be re-normalised by hand like any other
+ * emitter). Derived by measuring: authored literally, void-low rendered at
+ * 10/255 against a specified 16. Re-measure if the tone curve ever changes.
+ */
+const BACKDROP_TONE_GAIN = 1.8 * RIG_SCALE;
+
 const BACKDROP_VERT = /* glsl */ `
 varying vec3 vWorld;
 void main() {
@@ -343,6 +381,7 @@ uniform vec3  uPoolCentre;
 uniform float uPoolRadius;
 uniform float uDesaturate;
 uniform float uDarken;
+uniform float uGain;
 uniform sampler2D uNoise;
 uniform float uNoiseSize;
 
@@ -351,17 +390,29 @@ varying vec3 vWorld;
 void main() {
   vec3 dir = normalize( vWorld );
 
-  // Elevation ramp: void-low at and below the horizon, void-high by 60 degrees.
+  // Elevation ramp, anchored at the bottom of the sphere rather than at the
+  // horizon. A 22° lens looking 8.8° down sees roughly 0–5° of elevation on an
+  // 8 m backdrop, so a ramp that starts at the horizon is a no-op: every pixel
+  // in frame lands on void-low and the gradient the bible asks for does not
+  // exist. Starting at the pole puts a real, readable ramp inside that band.
   float elevation = asin( clamp( dir.y, -1.0, 1.0 ) );
-  float t = smoothstep( 0.0, 1.0471976, elevation );
+  float t = smoothstep( -1.5707963, 1.0471976, elevation );
   vec3 colour = mix( uLow, uHigh, t );
 
   // Warm pool. Measured as a distance across the backdrop surface rather than
   // an angle, so it stays a fixed physical size as the camera parallaxes and
   // never slides against the board it is meant to separate.
   float d = distance( vWorld, uPoolCentre ) / uPoolRadius;
-  float pool = 1.0 - smoothstep( 0.0, 1.0, d );
-  colour += uPool * pool * pool * 0.10;
+  colour += uPool * ( 1.0 - smoothstep( 0.0, 1.0, d ) ) * 0.10;
+
+  // The bible specifies this backdrop in *display* sRGB, but everything the
+  // scene renders passes through AgX and the exposure before it reaches the
+  // canvas, and AgX's toe sits exactly where these values live: authored
+  // literally, #101114 arrives at roughly 10/255 instead of 16, and §9 item 7's
+  // "no pixel below 4/255" fails across a third of the frame. This is the
+  // pre-compensation for that curve, calibrated by measuring the rendered
+  // result rather than by inverting AgX in closed form.
+  colour *= uGain;
 
   float luma = dot( colour, vec3( 0.2126, 0.7152, 0.0722 ) );
   colour = mix( colour, vec3( luma ), uDesaturate ) * uDarken;
@@ -396,6 +447,7 @@ export function createBackdrop(blueNoise: Texture): Backdrop {
       uPoolRadius: { value: 1.6 },
       uDesaturate: { value: 0 },
       uDarken: { value: 1 },
+      uGain: { value: BACKDROP_TONE_GAIN },
       uNoise: { value: blueNoise },
       uNoiseSize: { value: blueNoise.image ? (blueNoise.image as { width: number }).width : 64 },
     },
@@ -442,13 +494,28 @@ export function createBackdrop(blueNoise: Texture): Backdrop {
 export function createContactShadow(): Mesh {
   const size = 512;
   const data = new Uint8Array(size * size * 4);
+  // The decal is the plinth footprint at 1.15x, so the plinth's own edge sits
+  // at 1/1.15 of the half-extent and the penumbra has the remaining margin to
+  // fade across.
+  const edge = 0.5 / 1.15;
+  const margin = 0.5 - edge;
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = (x + 0.5) / size - 0.5;
-      const v = (y + 0.5) / size - 0.5;
-      const d = Math.min(1, Math.hypot(u, v) * 2);
-      // Gaussian core, gamma 1.6 on the falloff to keep the shoulder long.
-      const occ = Math.pow(Math.exp(-2.6 * d * d), 1.6);
+      const u = Math.abs((x + 0.5) / size - 0.5);
+      const v = Math.abs((y + 0.5) / size - 0.5);
+      // Signed distance to the *rectangle*, not a radial gradient. The plinth
+      // is 420 x 140 — a 3:1 footprint — and a radial falloff on that inscribes
+      // an ellipse: it reaches zero long before the ends of the plinth, so the
+      // shadow disappears exactly where the object still touches the table.
+      // That is why the set read as floating.
+      const qx = u - edge;
+      const qy = v - edge;
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+      const inside = Math.min(Math.max(qx, qy), 0);
+      const d = clamp01((outside + inside) / margin);
+      // Gamma 1.6 on the falloff keeps the shoulder long and the core solid.
+      const occ = Math.pow(1 - d, 1.6);
       const shade = Math.round((1 - 0.5 * occ) * 255);
       const i = (y * size + x) * 4;
       data[i] = data[i + 1] = data[i + 2] = shade;

@@ -89,10 +89,22 @@ const SCENES = {
     await c4.frames(9);
   },
 
-  /** Easy mode teaching overlay: 2s and 3s marked for both colours. */
+  /**
+   * Easy mode teaching overlay, on a position built to exercise it fully.
+   *
+   * Ember to move, holding a vertical three in column 7 with a playable gap
+   * above it (class A1, "you win here"); Petrol holding an OPEN three along the
+   * bottom with playable gaps at both ends (class A2, and the loudest thing the
+   * coach ever shows). Three urgent ghosts against a budget of two, so the
+   * frame also demonstrates the noise cap dropping the lowest-priority one.
+   *
+   * The previous fixture was simply wrong: it played Ember into four in a row,
+   * so every capture of it was a finished game with the result banner up and no
+   * coach elements at all.
+   */
   teaching: async (c4) => {
     await c4.reset({ difficulty: 'easy', teaching: true });
-    await c4.playMoves([3, 0, 4, 1, 2, 0, 5, 6]);
+    await c4.playMoves([6, 1, 6, 2, 6, 3, 5, 5]);
     await c4.settle();
   },
 

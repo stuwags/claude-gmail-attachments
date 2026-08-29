@@ -28,7 +28,7 @@ import {
 } from 'three';
 import type { Coord, Player } from '../../engine/types.ts';
 import { Player as P } from '../../engine/types.ts';
-import { cellPosition } from '../layout.ts';
+import { cellPosition, PANEL_SANDWICH_DEPTH } from '../layout.ts';
 import type {
   DiscTreatment,
   EffectContext,
@@ -410,18 +410,30 @@ class OutcomeEffectsImpl implements OutcomeEffects {
       uniforms: {
         uColor: { value: this.humanLost ? PEWTER : GOLD },
         uProgress: { value: 0 },
-        uIntensity: { value: 3.0 },
+        // 2.4 rather than the bible's original 3.0: at 3.0 the core clips to
+        // paper white and the gold identity is lost entirely. At 2.4 the core
+        // stays gold and the halo becomes bloom's job, which is where §4.3
+        // wants it anyway.
+        uIntensity: { value: 2.4 },
       },
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
+      // Drawn in front of everything. Threaded through the disc centres inside
+      // the board it was chopped into disconnected dashes by the solid acrylic
+      // between the holes, which destroys the one thing it exists to be: a
+      // single continuous line. §6.1 asks for a line drawn through the four
+      // centres, and at this camera the front-of-panel reading is identical
+      // apart from being unbroken.
+      depthTest: false,
       toneMapped: true,
     });
 
     const mesh = new Mesh(geometry, material);
     mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.position.z = PANEL_SANDWICH_DEPTH / 2 + 0.002;
     mesh.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), b.clone().sub(a).normalize());
-    mesh.renderOrder = 6;
+    mesh.renderOrder = 20;
     this.root.add(mesh);
 
     this.filament = mesh;

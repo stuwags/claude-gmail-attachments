@@ -55,6 +55,8 @@ import {
   createContactShadow,
   createLightRig,
   PALETTE,
+  RIG_SCALE,
+  TONE_EXPOSURE,
   type Backdrop,
   type LightRig,
 } from './environment';
@@ -378,7 +380,17 @@ class BoardScene implements SceneBoardView {
     });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = AgXToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    // Bible §0 pins this at 1.15 and §2.1 names exposure as the *only* sanctioned
+    // brightness control. Measured at 1.15, the rig as specified puts about 11
+    // irradiance on the tabletop, and AgX renders a 1.4 %-albedo basalt slab at
+    // 41 % grey — brighter than anything else in the lower half of the frame,
+    // with its clearcoat sheen buried under its own diffuse. TONE_EXPOSURE is
+    // 0.68, −0.76 EV, which brings the slab to roughly 22 % and lets the horizon
+    // card's streak read without pulling the aluminium below where the chamfers
+    // still catch. It is divided by RIG_SCALE because the rig itself is
+    // re-normalised into scene-referred units; the product of the two is what
+    // reaches the image. See RIG_SCALE in environment.ts.
+    this.renderer.toneMappingExposure = TONE_EXPOSURE / RIG_SCALE;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = VSMShadowMap;
     this.renderer.transmissionResolutionScale = 0.5;
@@ -404,7 +416,8 @@ class BoardScene implements SceneBoardView {
     // can be thrown away immediately; it is only ever photographed once.
     this.envMap = buildEnvironmentMap(this.renderer);
     this.scene.environment = this.envMap;
-    this.scene.environmentIntensity = 0.55;
+    // Bible §2.3's 0.55, in the same scene-referred units as the analytic rig.
+    this.scene.environmentIntensity = 0.55 * RIG_SCALE;
 
     const disc = createDiscGeometry();
     this.materials = createMaterials(disc.grooveBands, disc.profileLength);
@@ -960,7 +973,12 @@ class BoardScene implements SceneBoardView {
       this.dummy.rotation.set(0, 0, 0);
       this.dummy.updateMatrix();
       this.rimStrokes.setMatrixAt(n, this.dummy.matrix);
-      this.rimStrokes.setColorAt(n, this.scratchColor.setHex(PALETTE.ink).multiplyScalar(weight));
+      // Additive and scene-referred: the strokes carry the rig's scale so their
+      // on-screen weight is the bible's 8 % / 20 % after exposure.
+      this.rimStrokes.setColorAt(
+        n,
+        this.scratchColor.setHex(PALETTE.ink).multiplyScalar(weight * RIG_SCALE),
+      );
       n++;
     };
 
