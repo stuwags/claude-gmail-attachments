@@ -8,6 +8,7 @@
  */
 
 import type { Cell, Coord, Player, ThreatReport } from '../engine/types.ts';
+import type { CoachMode } from './effects/types.ts';
 
 /** Visual quality tier. Chosen automatically, overridable by the player. */
 export type QualityTier = 'low' | 'medium' | 'high' | 'ultra';
@@ -95,6 +96,14 @@ export interface BoardView {
    * `null` turns the overlay off.
    */
   setTeachingOverlay(report: ThreatReport | null, viewer: Player): void;
+
+  /**
+   * Coach verbosity: off shows nothing, hints shows only the urgent class A
+   * threats, full applies the whole staging budget. Separate from
+   * `setTeachingOverlay` because that carries only "a report, or nothing" —
+   * without this the chip's three states collapse into on and off.
+   */
+  setCoachMode(mode: CoachMode): void;
 
   /** The AI is thinking; show a restrained indicator rather than freezing. */
   setThinking(thinking: boolean): void;

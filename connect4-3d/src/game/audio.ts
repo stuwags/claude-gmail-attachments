@@ -148,7 +148,15 @@ export class AudioEngine {
    * @param stackHeight How many discs are already below it. A taller stack has
    *   less air column under the disc, which raises and shortens the click.
    */
-  discImpact(strength: number, stackHeight: number): void {
+  /**
+   * A disc striking the stack or the floor of the board.
+   *
+   * @param delaySeconds Time until the physical contact. The renderer knows
+   *   this a frame ahead, so the transient can be scheduled on the exact
+   *   contact frame rather than fired when the frame that already drew the
+   *   collision happens to run — a frame late is audible as a mistimed click.
+   */
+  discImpact(strength: number, stackHeight: number, delaySeconds = 0): void {
     const s = Math.max(0, Math.min(1, strength));
     // Roughly a musical fifth of variation across a full column.
     const rate = 0.86 + stackHeight * 0.055 + (Math.random() - 0.5) * 0.05;
@@ -157,10 +165,16 @@ export class AudioEngine {
       rate,
       reverb: 0.18 + s * 0.12,
       pan: 0,
+      delay: delaySeconds,
     });
     // A heavy landing also thumps the wooden base.
     if (s > 0.45) {
-      this.play('body', { gain: (s - 0.45) * 0.5, rate: 0.95 + Math.random() * 0.1, reverb: 0.3 });
+      this.play('body', {
+        gain: (s - 0.45) * 0.5,
+        rate: 0.95 + Math.random() * 0.1,
+        reverb: 0.3,
+        delay: delaySeconds,
+      });
     }
   }
 
@@ -208,7 +222,7 @@ export class AudioEngine {
 
   private play(
     name: string,
-    opts: { gain: number; rate?: number; reverb?: number; pan?: number },
+    opts: { gain: number; rate?: number; reverb?: number; pan?: number; delay?: number },
   ): void {
     const ctx = this.ctx;
     const master = this.master;
@@ -240,7 +254,7 @@ export class AudioEngine {
       node.connect(send).connect(this.reverbSend);
     }
 
-    src.start();
+    src.start(opts.delay ? ctx.currentTime + opts.delay : 0);
   }
 
   /* -------------------- synthesis -------------------- */

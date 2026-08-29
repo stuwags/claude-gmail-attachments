@@ -73,23 +73,27 @@ export const PALETTE = {
  * disc body: §9 item 9 fails on sight, and the halo desaturated the discs into
  * pale salmon and washed the lathed grooves out of them entirely.
  *
- * Tone mapping happens *after* bloom, so exposure cannot fix this — only the
- * scene-referred scale can. Scaling every emitter by this factor and dividing
- * the exposure by it leaves the tone-mapped image bit-for-bit unchanged (the
- * chain's vignette, aberration, AO and DoF are all scale-invariant, and its
- * grain is expressed relative to the exposed signal), while moving diffuse
- * radiance back under 1.0 where it belongs. Everything in this codebase that
- * authors an absolute radiance — the backdrop, the ghost, the hover strokes,
- * the disc ignition emissive — is scaled by this same constant.
+ * Tone mapping happens *after* bloom, so exposure cannot fix this — and §0's
+ * exposure is frozen in any case. The rig is the right place: the same factor
+ * also brings the frame down from two stops hot to the art director's screen
+ * targets (tabletop 33-45 code values, top rail 95-125), because irradiance and
+ * displayed brightness are the same lever once exposure is fixed.
+ *
+ * The canonical key : fill : rim ratio of 1 : 0.24 : 2.4 is untouched — this is
+ * a uniform scale on all four emitters and on the environment, not a rebalance.
+ * Everything in this codebase that authors an absolute radiance — the backdrop,
+ * the ghost, the hover strokes, the disc ignition emissive — carries it too.
  *
  * Integrators: values authored in scene-referred units elsewhere (the coach's
- * additive filaments, the win filament's emissive) are unaffected by the scale
- * but appear 1/0.35 brighter after exposure, and need recalibrating against it.
+ * additive filaments, the win filament's emissive 3.0) are not scaled, so they
+ * now sit further above the scene than before. That is deliberate for the
+ * filament, which §4.3 wants to tickle bloom; the coach's opacities are worth
+ * re-measuring against §7.2's on-screen values.
  */
-export const RIG_SCALE = 0.35;
+export const RIG_SCALE = 0.28;
 
-/** Display exposure, after the rig re-normalisation above is divided out. */
-export const TONE_EXPOSURE = 0.68;
+/** Bible §0's exposure, unchanged. Brightness is corrected in the rig, not here. */
+export const TONE_EXPOSURE = 1.15;
 
 const KEY_COLOR = 0xfff1e3;
 const FILL_COLOR = 0xd8e3ee;
@@ -199,12 +203,28 @@ export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   scene.add(room);
 
   scene.add(emissiveCard(1.2, 1.8, KEY_COLOR, 20, new Vector3(-0.85, 1.35, 0.95)));
-  scene.add(emissiveCard(2.5, 2.5, FILL_COLOR, 4.5, new Vector3(1.6, 0.9, 0.6)));
-  scene.add(emissiveCard(0.3, 1.8, RIM_COLOR, 45, new Vector3(1.15, 0.55, -1.25)));
+  // 4.5 -> 1.5. §2.3's fill card is 6.25 m2 hanging 1.1 m off the subject, on
+  // the same side as the rim: measured, the environment alone lit the tabletop's
+  // right third 2.4x harder than its left, which is what inverted the key/fill
+  // relationship. The analytic fill keeps its specified 2.2 and its canonical
+  // 0.24 ratio; this is the card that was double-counting it.
+  scene.add(emissiveCard(2.5, 2.5, FILL_COLOR, 1.5, new Vector3(1.6, 0.9, 0.6)));
+  // 45 -> 32 (art-director revision): at 45 this card was the brightest thing
+  // in the environment and lit the tabletop's right third harder than the key lit
+  // its left, inverting the whole key/fill relationship.
+  scene.add(emissiveCard(0.3, 1.8, RIM_COLOR, 32, new Vector3(1.15, 0.55, -1.25)));
 
-  // Behind the camera, low and wide: the long warm streak in the tabletop
-  // sheen. Without it the table reflects nothing and reads as flat paint.
-  const horizon = emissiveCard(3.0, 0.6, HORIZON_COLOR, 0.8, new Vector3(0, 0.4, 1.9));
+  // Behind the camera: the long warm streak in the tabletop sheen, and the only
+  // thing in the studio that a *front-facing* surface can reflect at all.
+  //
+  // Enlarged and dropped from §2.3's 3.0 x 0.6 at y = 0.4. Measured, the rails
+  // were rendering at 28-44 code values against a 70-125 target, and the reason
+  // is geometric: a vertical front face at board height mirrors the view ray
+  // forward and *down*, crossing z = 1.9 at y = -0.09. The card as specified sat
+  // entirely above that path, so the aluminium had nothing to reflect but the
+  // black room. A taller card centred near the table plane lands in the mirror
+  // path of both the rails and the slab, which is what the frame was missing.
+  const horizon = emissiveCard(3.0, 1.6, HORIZON_COLOR, 1.2, new Vector3(0, 0.15, 1.9));
   scene.add(horizon);
 
   const pmrem = new PMREMGenerator(renderer);
@@ -354,13 +374,49 @@ export interface Backdrop {
 const BACKDROP_RADIUS = 8;
 
 /**
- * Pre-compensation that puts the bible's display-referred backdrop colours back
- * where they belong after AgX and the exposure, times the rig scale (the
- * backdrop is unlit, so it has to be re-normalised by hand like any other
- * emitter). Derived by measuring: authored literally, void-low rendered at
- * 10/255 against a specified 16. Re-measure if the tone curve ever changes.
+ * Invert AgX so a display-referred colour can be authored directly.
+ *
+ * The dark-end palette hexes are *screen targets*, not shader inputs: authored
+ * literally, `#101114` renders at (9,10,14) because AgX's toe crushes exactly
+ * the range the void lives in. This solves the tone curve backwards — given the
+ * linear value the frame should end up with, it returns the linear value the
+ * shader has to emit for AgX at `exposure` to produce it.
+ *
+ * Three's AgX is `pow(contrast(normalise(log2(x))), 2.2)` around a pair of
+ * colour matrices. The matrices are near-identity for the neutral, very dark
+ * colours this is used on, so they are skipped and the contrast polynomial —
+ * monotonic on [0,1] — is inverted by bisection. Twenty-eight iterations puts
+ * the answer well inside a code value.
  */
-const BACKDROP_TONE_GAIN = 1.8 * RIG_SCALE;
+function inverseAgX(displayLinear: number, exposure: number): number {
+  const MIN_EV = -12.47393;
+  const MAX_EV = 4.026069;
+  // three's agxDefaultContrastApprox.
+  const contrast = (t: number) =>
+    ((((15.5 * t - 40.14) * t + 31.96) * t - 6.868) * t + 0.4298) * t * t + 0.1191 * t - 0.00232;
+
+  const y = Math.pow(Math.max(displayLinear, 1e-8), 1 / 2.2);
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 28; i++) {
+    const mid = (lo + hi) / 2;
+    if (contrast(mid) < y) lo = mid;
+    else hi = mid;
+  }
+  const t = (lo + hi) / 2;
+  return Math.pow(2, t * (MAX_EV - MIN_EV) + MIN_EV) / exposure;
+}
+
+/** A palette hex, pre-compensated so the *rendered* frame lands on that hex. */
+function screenReferred(hex: number): Color {
+  const c = new Color(hex);
+  return c.setRGB(
+    inverseAgX(c.r, TONE_EXPOSURE),
+    inverseAgX(c.g, TONE_EXPOSURE),
+    inverseAgX(c.b, TONE_EXPOSURE),
+    'srgb-linear',
+  );
+}
 
 const BACKDROP_VERT = /* glsl */ `
 varying vec3 vWorld;
@@ -381,7 +437,6 @@ uniform vec3  uPoolCentre;
 uniform float uPoolRadius;
 uniform float uDesaturate;
 uniform float uDarken;
-uniform float uGain;
 uniform sampler2D uNoise;
 uniform float uNoiseSize;
 
@@ -390,29 +445,24 @@ varying vec3 vWorld;
 void main() {
   vec3 dir = normalize( vWorld );
 
-  // Elevation ramp, anchored at the bottom of the sphere rather than at the
-  // horizon. A 22° lens looking 8.8° down sees roughly 0–5° of elevation on an
-  // 8 m backdrop, so a ramp that starts at the horizon is a no-op: every pixel
-  // in frame lands on void-low and the gradient the bible asks for does not
-  // exist. Starting at the pole puts a real, readable ramp inside that band.
+  // Elevation ramp, spanning the band this lens can actually see. A 22 degree
+  // lens looking 8.8 degrees down sees roughly -1 to +6 degrees of elevation on
+  // an 8 m backdrop, so the bible's literal "horizon to 60 degrees" ramp is a
+  // no-op: every pixel in frame lands on void-low and the gradient does not
+  // exist. Running void-low to void-high across the visible band instead puts
+  // the specified two-value spread where the viewer is looking, which is what
+  // the spec is for.
   float elevation = asin( clamp( dir.y, -1.0, 1.0 ) );
-  float t = smoothstep( -1.5707963, 1.0471976, elevation );
+  float t = smoothstep( -0.0349, 0.1222, elevation );
   vec3 colour = mix( uLow, uHigh, t );
 
   // Warm pool. Measured as a distance across the backdrop surface rather than
   // an angle, so it stays a fixed physical size as the camera parallaxes and
   // never slides against the board it is meant to separate.
+  // §1.1's warm pool, at the revised 16 % peak. At 10 % of a correctly dark
+  // backdrop it landed under one code value once AgX had it.
   float d = distance( vWorld, uPoolCentre ) / uPoolRadius;
-  colour += uPool * ( 1.0 - smoothstep( 0.0, 1.0, d ) ) * 0.10;
-
-  // The bible specifies this backdrop in *display* sRGB, but everything the
-  // scene renders passes through AgX and the exposure before it reaches the
-  // canvas, and AgX's toe sits exactly where these values live: authored
-  // literally, #101114 arrives at roughly 10/255 instead of 16, and §9 item 7's
-  // "no pixel below 4/255" fails across a third of the frame. This is the
-  // pre-compensation for that curve, calibrated by measuring the rendered
-  // result rather than by inverting AgX in closed form.
-  colour *= uGain;
+  colour += uPool * ( 1.0 - smoothstep( 0.0, 1.0, d ) ) * 0.16;
 
   float luma = dot( colour, vec3( 0.2126, 0.7152, 0.0722 ) );
   colour = mix( colour, vec3( luma ), uDesaturate ) * uDarken;
@@ -440,14 +490,13 @@ export function createBackdrop(blueNoise: Texture): Backdrop {
 
   const material = new ShaderMaterial({
     uniforms: {
-      uLow: { value: new Color(PALETTE.voidLow) },
-      uHigh: { value: new Color(PALETTE.voidHigh) },
-      uPool: { value: new Color(PALETTE.pool) },
+      uLow: { value: screenReferred(PALETTE.voidLow) },
+      uHigh: { value: screenReferred(PALETTE.voidHigh) },
+      uPool: { value: screenReferred(PALETTE.pool) },
       uPoolCentre: { value: poolCentre },
       uPoolRadius: { value: 1.6 },
       uDesaturate: { value: 0 },
       uDarken: { value: 1 },
-      uGain: { value: BACKDROP_TONE_GAIN },
       uNoise: { value: blueNoise },
       uNoiseSize: { value: blueNoise.image ? (blueNoise.image as { width: number }).width : 64 },
     },

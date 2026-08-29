@@ -391,7 +391,13 @@ export function createMaterials(
     transmission: 1.0,
     thickness: 0.006,
     attenuationColor: new Color(PALETTE.smoke),
-    attenuationDistance: 0.02,
+    // 0.02 -> 0.018. At the specified distance a 6 mm sheet passes 58 % of
+    // whatever is behind the board, so an empty cell sat within one code value
+    // of the raw backdrop and the object had no silhouette at all. This is the
+    // shortest mean free path that still keeps the cavity clear of §9 item 7's
+    // 4/255 floor: measured, 0.010 put 13.7 % of the frame under it and 0.015
+    // still put 2.8 % there.
+    attenuationDistance: 0.018,
     roughness: 0.06,
     metalness: 0.0,
     ior: 1.49,
@@ -563,11 +569,14 @@ function injectDiscTreatment(material: MeshPhysicalMaterial): void {
       )
       .replace(
         '#include <emissivemap_fragment>',
-        // Bible §6.1's "body colour times 2.2", expressed in the scene-referred
-        // units the rest of the rig uses so an ignited disc sits the same
-        // distance above its neighbours whatever the rig scale is.
+        // `ignition` is a direct multiplier on body colour, not a 0..1 ramp:
+        // `effects/outcome.ts` already folds §6.1's 2.2 into the value it
+        // returns, and applying it twice would put an ignited disc through the
+        // bloom threshold and halo it, which §9 item 9 forbids. Only the rig
+        // scale is applied here, so a lit disc keeps the same distance above its
+        // neighbours whatever the scene's absolute scale is.
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vColor.rgb * vTreat.x * ${(2.2 * RIG_SCALE).toFixed(4)};`,
+        totalEmissiveRadiance += vColor.rgb * vTreat.x * ${RIG_SCALE.toFixed(4)};`,
       );
   };
   // Static injection, so one cache key for every compile of this material.

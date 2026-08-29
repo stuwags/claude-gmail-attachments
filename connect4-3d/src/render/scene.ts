@@ -216,7 +216,10 @@ class FallbackOutcome implements OutcomeEffects {
     const ramp = clamp01(local / 0.35);
     // Breathe 0.85–1.0 at a 1.8 s period once lit, as the real sequence does.
     const breath = ramp >= 1 ? 0.925 + 0.075 * Math.sin((this.t / 1.8) * Math.PI * 2) : 1;
-    return { ignition: ramp * breath, desaturation: 0, darken: 1, roughnessBias: 0 };
+    // ×2.2 here, matching `effects/outcome.ts`: `ignition` is a multiplier on
+    // body colour, and the sequence owns §6.1's factor so the scene applies it
+    // exactly once.
+    return { ignition: ramp * breath * 2.2, desaturation: 0, darken: 1, roughnessBias: 0 };
   }
 
   house(): HouseTreatment {
@@ -380,20 +383,22 @@ class BoardScene implements SceneBoardView {
     });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = AgXToneMapping;
-    // Bible §0 pins this at 1.15 and §2.1 names exposure as the *only* sanctioned
-    // brightness control. Measured at 1.15, the rig as specified puts about 11
-    // irradiance on the tabletop, and AgX renders a 1.4 %-albedo basalt slab at
-    // 41 % grey — brighter than anything else in the lower half of the frame,
-    // with its clearcoat sheen buried under its own diffuse. TONE_EXPOSURE is
-    // 0.68, −0.76 EV, which brings the slab to roughly 22 % and lets the horizon
-    // card's streak read without pulling the aluminium below where the chamfers
-    // still catch. It is divided by RIG_SCALE because the rig itself is
-    // re-normalised into scene-referred units; the product of the two is what
-    // reaches the image. See RIG_SCALE in environment.ts.
-    this.renderer.toneMappingExposure = TONE_EXPOSURE / RIG_SCALE;
+    // Bible §0's 1.15, frozen. The frame was two stops hot, but the fix belongs
+    // in the rig (RIG_SCALE, environment.ts) rather than here: exposure is applied
+    // after bloom, so it cannot move a diffuse surface back under the bloom
+    // threshold, and it would drag the authored backdrop values with it.
+    this.renderer.toneMappingExposure = TONE_EXPOSURE;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = VSMShadowMap;
-    this.renderer.transmissionResolutionScale = 0.5;
+    // Set per tier in `applyTransmissionScale`, not here. Bible §0 asks for 0.5,
+    // but every disc in the game is seen *through* the front acrylic, so the
+    // transmission buffer is not a background — it is the hero object's only
+    // rasterisation. At 0.5 the clearcoat highlight, both lathed grooves and the
+    // 1.5 mm rim fillet are resolved at half resolution and upscaled, which is
+    // the soft halo around every disc and an outright failure of §9 items 1, 2
+    // and 3. Tier B keeps 0.5, where the panels fall back to sorted alpha and
+    // the trade is the whole point.
+    this.applyTransmissionScale();
     this.renderer.setClearColor(PALETTE.voidLow, 1);
     // Manual reset. `autoReset` clears the counters at the top of every
     // `renderer.render()` — including the fullscreen quad each post effect
@@ -459,7 +464,7 @@ class BoardScene implements SceneBoardView {
     mouths.receiveShadow = true;
 
     for (const z of [PANEL_BACK_Z, PANEL_FRONT_Z]) {
-      const panel = new Mesh(createPanelGeometry(), this.materials.acrylic);
+      const panel = new Mesh(createPanelGeometry(z > 0), this.materials.acrylic);
       panel.position.z = z;
       // Neither casts nor receives. Casting is obviously wrong for a sheet the
       // light passes through — but so is receiving, because three renders VSM
@@ -1147,10 +1152,15 @@ class BoardScene implements SceneBoardView {
     return this.quality === 'high' || this.quality === 'ultra';
   }
 
+  private applyTransmissionScale(): void {
+    this.renderer.transmissionResolutionScale = this.isTierA ? 1.0 : 0.5;
+  }
+
   setQuality(tier: QualityTier): void {
     if (tier === this.quality) return;
     this.quality = tier;
     this.materials.setTier(tier);
+    this.applyTransmissionScale();
     this.post?.setQuality(tier);
     const size = this.renderer.getSize(this.scratchV2);
     this.resize(size.x, size.y, this.options.canvas.ownerDocument.defaultView?.devicePixelRatio ?? 1);

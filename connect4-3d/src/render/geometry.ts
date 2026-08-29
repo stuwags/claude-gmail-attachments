@@ -330,13 +330,30 @@ export function createGhostDiscGeometry(): BufferGeometry {
  */
 const HOLE_SEGMENTS = 48;
 
-export function createPanelGeometry(): BufferGeometry {
+/**
+ * One acrylic sheet. `apertures` cuts the 42 windows; the back sheet is solid.
+ *
+ * The bible's table lists holes in both panels, but a board built that way is a
+ * row of through-holes: an empty cell shows the raw backdrop with nothing in
+ * between, measured at one code value from the backdrop itself. Two things
+ * follow, and both are bugs. The board's upper half dissolves into the void
+ * because it has no silhouette, and the lower cells show the lit tabletop
+ * through the board and read as a third, grey disc colour — a false disc on a
+ * game board is a legibility failure, not a beauty one.
+ *
+ * A solid back sheet is also the only version that holds a disc in: the sheet
+ * is what captures it. It puts §3.2's smoke between the eye and everything
+ * behind the board, which is what §9 item 4 is checking for.
+ */
+export function createPanelGeometry(apertures = true): BufferGeometry {
   const w = (BOARD_WIDTH - 2 * RAIL_SECTION) / 2;
   const h = (BOARD_HEIGHT - 2 * RAIL_SECTION) / 2;
   const shape = new Shape(roundedRect(w, h, 0.004, 4, 0, BOARD_CENTRE_Y));
-  for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS; r++) {
-      shape.holes.push(new Path(circle(columnX(c), rowY(r), HOLE_RADIUS, HOLE_SEGMENTS)));
+  if (apertures) {
+    for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS; r++) {
+        shape.holes.push(new Path(circle(columnX(c), rowY(r), HOLE_RADIUS, HOLE_SEGMENTS)));
+      }
     }
   }
   return crease(extrudeCentred(shape, PANEL_THICKNESS, CHAMFER, 1), 30);

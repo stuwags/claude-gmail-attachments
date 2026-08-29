@@ -73,6 +73,19 @@ async function boot(): Promise<void> {
 
   const input = new InputController({ canvas, view, controller, audio, reducedMotion });
 
+  // Disc contacts. The renderer knows each impact a frame ahead and reports how
+  // long until the physical contact, so the transient is scheduled on that
+  // exact moment instead of firing when the frame that already drew the
+  // collision happens to run. A click a frame late is audible.
+  //
+  // Impact speed is normalised against a full-height drop (~2.53 m/s), so a
+  // disc landing on a tall stack is quieter than one hitting the empty floor,
+  // and each bounce is quieter than the landing before it.
+  const FULL_DROP_SPEED = 2.53;
+  view.onImpact((impact) => {
+    audio.discImpact(impact.speed / FULL_DROP_SPEED, impact.row, impact.lead);
+  });
+
   // Keyboard play is reported by the HUD, which owns the visible selection and
   // the screen-reader announcements, and routed here into the same controller
   // calls a pointer gesture makes. See `src/ui/events.ts`.

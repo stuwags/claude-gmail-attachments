@@ -104,6 +104,7 @@ export class GameController {
     this.deps.view.clearOutcome();
     this.deps.view.setThinking(false);
     this.deps.view.setHover(null, null, this.config.humanPlayer);
+    this.deps.view.setCoachMode(this.config.coachMode);
     this.deps.view.setPosition(this.board.cells());
     this.deps.hud.hideBanner();
     this.refreshCoach();
@@ -316,6 +317,9 @@ export class GameController {
 
   setCoachMode(mode: CoachMode): void {
     this.config.coachMode = mode;
+    // Verbosity and content travel separately: this sets how much the overlay
+    // is allowed to show, `refreshCoach` sets what there is to show.
+    this.deps.view.setCoachMode(mode);
     this.refreshCoach();
     this.publish();
   }
