@@ -293,7 +293,10 @@ export function createGhostMaterial(reducedMotion: boolean): GhostMaterial {
     transparent: true,
     blending: AdditiveBlending,
     depthWrite: false,
-    side: DoubleSide,
+    // FrontSide, not DoubleSide: with additive blending a two-sided shell adds
+    // its fresnel twice, and the bible's 0.10-to-0.45 figures are final
+    // on-screen values, not per-layer ones.
+    side: FrontSide,
     toneMapped: true,
   });
 

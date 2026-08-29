@@ -149,11 +149,16 @@ async function boot(): Promise<void> {
           coachMode,
         });
       }
-      await view.settle();
+      // Snap rather than wait: under the harness's software rasteriser a frame
+      // costs seconds, so waiting out the intro camera move in real time takes
+      // minutes and photographs nothing different at the end of it.
+      view.snapAnimations();
+      await view.waitFrames(1);
     },
     async playMoves(cols) {
       controller.applyMovesInstantly(cols);
-      await view.settle();
+      view.snapAnimations();
+      await view.waitFrames(1);
     },
     async beginDrop(col) {
       const board = controller.position;

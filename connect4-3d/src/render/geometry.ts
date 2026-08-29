@@ -161,32 +161,33 @@ function extrudeCentred(
 }
 
 /**
- * A box with every one of its twelve edges broken. The four edges parallel to
- * the extrusion get their radius from the shape's rounded corners; the eight
- * cap edges get it from the bevel. Cheap, and the only reliable way to make a
- * rail read as milled aluminium rather than as a cube.
+ * A box with every one of its twelve edges broken by the same flat 45° chamfer.
+ *
+ * The eight cap edges get theirs from the bevel. The four edges parallel to the
+ * extrusion get theirs from a *one-segment* rounded corner — a single segment
+ * across 90° is a straight chord, which is exactly a chamfer of the same leg
+ * length, so all twelve edges are geometrically identical. That matters here:
+ * the bible's check is a *continuous bright chamfer line* down the right rail,
+ * and a rounded arris smears that line into a soft gradient instead.
  */
-function chamferedBox(
-  w: number,
-  h: number,
-  d: number,
-  chamfer: number,
-  bevelSegments = 1,
-  cornerSegments = 3,
-): BufferGeometry {
-  const shape = new Shape(roundedRect(w / 2, h / 2, chamfer * 2, cornerSegments));
-  return crease(extrudeCentred(shape, d, chamfer, bevelSegments));
+function chamferedBox(w: number, h: number, d: number, chamfer: number): BufferGeometry {
+  const shape = new Shape(roundedRect(w / 2, h / 2, chamfer, 1));
+  // 35°, comfortably clear of the 45° a chamfer makes with either neighbour, so
+  // the chamfers stay crisp while curved contours smooth.
+  return crease(extrudeCentred(shape, d, chamfer, 1), 35);
 }
 
 /** As `chamferedBox`, but the big faces point up and down and carry planar UVs. */
 function chamferedSlab(w: number, d: number, h: number, fillet: number): BufferGeometry {
-  const shape = new Shape(roundedRect(w / 2, d / 2, fillet * 2, 3));
+  // The plinth and the slab are *filleted*, not chamfered (bible §1.2), so these
+  // corners are real arcs and the crease angle lets them shade smoothly.
+  const shape = new Shape(roundedRect(w / 2, d / 2, fillet * 2, 4));
   const geo = extrudeCentred(shape, h, fillet, 3);
   // Extrude runs along +Z; roll it flat so the caps become the top and bottom
   // faces. Cap UVs are the shape's own coordinates, i.e. metres of tabletop,
   // which is exactly the parameterisation the basalt speckle wants.
   geo.rotateX(-Math.PI / 2);
-  return crease(geo, 25);
+  return crease(geo, 30);
 }
 
 /* ------------------------------------------------------------------ *

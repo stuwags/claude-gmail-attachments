@@ -3,6 +3,8 @@ dist/
 dist-ssr/
 # Screenshot harness output — regenerate with `npm run shots`.
 shots/
+# Scratch probes written while investigating a frame.
+tools/.tmp/
 # Capacitor native projects are scaffolded on the developer's Mac.
 ios/
 android/

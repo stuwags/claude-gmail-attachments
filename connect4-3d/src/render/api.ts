@@ -115,4 +115,16 @@ export interface BoardView {
 
   /** Resolves once every in-flight animation has finished. */
   settle(): Promise<void>;
+
+  /**
+   * Jump every in-flight animation to its resting state: camera to its rest
+   * pose, framing cleared, discs down.
+   *
+   * This exists for the screenshot harness. `settle()` waits out animation in
+   * real time, which is correct in the game but ruinous under a software
+   * rasteriser, where a 1.4 second intro move costs several minutes of
+   * wall clock. Snapping gives the same final frame without paying for the
+   * frames in between.
+   */
+  snapAnimations(): void;
 }

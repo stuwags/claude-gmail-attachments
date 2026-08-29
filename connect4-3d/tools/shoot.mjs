@@ -114,7 +114,7 @@ const SCENES = {
 };
 
 function parseArgs(argv) {
-  const out = { scene: null, device: null, url: null };
+  const out = { scene: null, device: null, url: null, dpr: null };
   for (const a of argv.slice(2)) {
     const m = /^--([a-z]+)=(.*)$/.exec(a);
     if (m) out[m[1]] = m[2];
@@ -125,7 +125,10 @@ function parseArgs(argv) {
 /** Serve `dist/` with vite preview, resolving once it prints a URL. */
 function startServer() {
   return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['vite', 'preview', '--port', '4173', '--strictPort'], {
+    // No --strictPort: a previous run killed mid-screenshot can leave its
+    // server holding the port, and failing the whole capture over that is
+    // pointless when the URL is parsed from the output anyway.
+    const proc = spawn('npx', ['vite', 'preview', '--port', '4173'], {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -176,8 +179,13 @@ async function main() {
 
   try {
     for (const deviceName of deviceNames) {
+      // DPR is overridable because this renders on SwiftShader, where cost
+      // scales with pixel count and a Retina frame of this scene takes tens of
+      // seconds. DPR 1 is the iteration pass; DPR 2 is the review pass.
+      const device = DEVICES[deviceName];
       const context = await browser.newContext({
-        ...DEVICES[deviceName],
+        ...device,
+        deviceScaleFactor: args.dpr ? Number(args.dpr) : device.deviceScaleFactor,
         colorScheme: 'dark',
         reducedMotion: 'no-preference',
       });
@@ -203,7 +211,10 @@ async function main() {
         );
 
         const file = path.join(SHOTS, `${sceneName}-${deviceName}.png`);
-        await page.screenshot({ path: file });
+        // Generous: a frame of this scene costs tens of seconds on SwiftShader,
+        // and Playwright's 30s default expects a compositor keeping up in real
+        // time. This is a rendering-cost allowance, not a hang detector.
+        await page.screenshot({ path: file, timeout: 180_000 });
         console.log(`  ${path.relative(ROOT, file)}  (${Date.now() - t0}ms)`);
       }
 

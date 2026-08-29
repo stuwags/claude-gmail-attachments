@@ -30,6 +30,7 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   Mesh,
+  MeshBasicMaterial,
   Object3D,
   PerspectiveCamera,
   Plane,
@@ -263,7 +264,6 @@ interface ActiveDrop {
   col: number;
   row: number;
   player: Player;
-  instance: number;
   track: DropTrack;
   t: number;
   nextImpact: number;
@@ -307,12 +307,11 @@ class BoardScene implements SceneBoardView {
   private panels: Mesh[] = [];
   private disposables: { dispose(): void }[] = [];
 
-  /** Which player owns each cell, or -1. Indexed `col * ROWS + row`. */
-  private readonly cellOwner = new Int8Array(COLS * ROWS).fill(-1);
   /** Cell -> instance slot, and back. Discs are packed so `count` is truthful. */
   private readonly cellSlot = new Int16Array(COLS * ROWS).fill(-1);
   private readonly slotCell = new Int16Array(COLS * ROWS).fill(-1);
   private discCount = 0;
+  private treatDirty = true;
   /** Empty stand-ins the effect systems address discs through. */
   private readonly discProxies: Object3D[] = [];
 
@@ -334,6 +333,7 @@ class BoardScene implements SceneBoardView {
   private ghostSlide: { from: number; to: number; t: number } | null = null;
   private thinking = false;
   private thinkingPhase = 0;
+  private thinkingFade = 0;
   private lastMover: Player = Player.Two;
   private reject: { col: number; t: number } | null = null;
 
@@ -416,7 +416,12 @@ class BoardScene implements SceneBoardView {
     this.table = new Mesh(createTableGeometry(), this.materials.basalt);
     this.table.name = 'tabletop';
     this.table.receiveShadow = true;
-    this.scene.add(this.table, createContactShadow());
+    const contact = createContactShadow();
+    const contactMaterial = contact.material as MeshBasicMaterial;
+    this.scene.add(this.table, contact);
+    this.disposables.push(this.table.geometry, contact.geometry, contactMaterial, {
+      dispose: () => contactMaterial.map?.dispose(),
+    });
 
     this.backdrop = createBackdrop(this.blueNoise);
     this.scene.add(this.backdrop.mesh);
@@ -443,9 +448,13 @@ class BoardScene implements SceneBoardView {
     for (const z of [PANEL_BACK_Z, PANEL_FRONT_Z]) {
       const panel = new Mesh(createPanelGeometry(), this.materials.acrylic);
       panel.position.z = z;
-      // A transmissive sheet cannot cast a meaningful opaque shadow, and a VSM
-      // map of one is a solid black rectangle where the smoke should be.
-      panel.receiveShadow = true;
+      // Neither casts nor receives. Casting is obviously wrong for a sheet the
+      // light passes through — but so is receiving, because three renders VSM
+      // *receivers* into the shadow map as well as casters, and a solid acrylic
+      // occluder in that map throws a hard shadow across every disc behind it.
+      // It is also 33k triangles a frame for a shadow nobody could see on glass.
+      panel.castShadow = false;
+      panel.receiveShadow = false;
       this.panels.push(panel);
     }
 
@@ -494,8 +503,23 @@ class BoardScene implements SceneBoardView {
     this.discMesh = new InstancedMesh(geometry, this.materials.disc, cells);
     this.discMesh.name = 'discs';
     this.discMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    // Neither, and both are deliberate. Casting: the discs live between two
+    // acrylic sheets, so their shadow lands on the back panel where no camera
+    // in this product can see it. Receiving: three renders VSM receivers into
+    // the shadow map as well as casters, which would put the whole 169k-triangle
+    // instanced set through a third full pass every frame — 45 % of the bible's
+    // entire triangle budget — to catch a shadow the front panel no longer
+    // casts anyway. Bible §2.2 assigns contact darkening inside the board to
+    // N8AO, and that is where it belongs.
     this.discMesh.castShadow = false;
-    this.discMesh.receiveShadow = true;
+    this.discMesh.receiveShadow = false;
+    // `InstancedMesh` computes its bounding sphere lazily and then caches it
+    // forever — it is never invalidated when instance matrices change. On an
+    // empty board that first computation runs over zero instances and yields an
+    // empty sphere (radius -1), which culls the mesh permanently: the board
+    // renders and no disc ever appears again. Culling is worthless here anyway,
+    // since the board is the subject of every frame this camera can compose.
+    this.discMesh.frustumCulled = false;
     // Every slot gets a colour up front. `instanceColor` decides at compile
     // time whether the shader declares `vColor`, which the treatment injection
     // reads for the ignition tint — creating it lazily would leave the first
@@ -633,7 +657,12 @@ class BoardScene implements SceneBoardView {
     // so overlay elements behind the acrylic dim rather than disappear.
     this.coach?.render();
 
-    this.bookkeep(dt * 1000);
+    // Bookkeeping gets the *unclamped* delta. Feeding it the animation clamp
+    // would cap the reported frame time at 50 ms, so a machine running at 3 fps
+    // would report 20 and the tier probe would never see how slow it really is.
+    // A separate, much looser cap keeps one backgrounded tab from poisoning the
+    // average.
+    this.bookkeep(Math.min(1000, Math.max(0, dtMs)));
   }
 
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
@@ -688,7 +717,9 @@ class BoardScene implements SceneBoardView {
       this.outcome.active ||
       this.ghostSlide !== null ||
       this.reject !== null ||
-      (this.hoverAlpha > 0.001 && this.hoverAlpha < 0.999 && this.hoverCol !== null)
+      // Mid-fade in *either* direction. Testing the alpha alone would let the
+      // harness screenshot a half-faded ghost on the way out.
+      (this.hoverPhase > 0 && this.hoverPhase < 1)
     );
   }
 
@@ -700,7 +731,6 @@ class BoardScene implements SceneBoardView {
     for (const d of this.drops) d.resolve?.();
     this.drops.length = 0;
 
-    this.cellOwner.fill(-1);
     this.cellSlot.fill(-1);
     this.slotCell.fill(-1);
     this.discCount = 0;
@@ -709,7 +739,6 @@ class BoardScene implements SceneBoardView {
       for (let row = 0; row < ROWS; row++) {
         const owner = cells[cellIndex(col, row)];
         if (owner === null || owner === undefined) continue;
-        this.cellOwner[cellIndex(col, row)] = owner;
         this.place(col, row, owner, rowY(row), 0);
       }
     }
@@ -754,17 +783,16 @@ class BoardScene implements SceneBoardView {
     resolve: (() => void) | null,
   ): void {
     const idx = cellIndex(col, row);
-    this.cellOwner[idx] = player;
     this.lastMover = player;
     const restY = rowY(row);
-    const slot = this.place(col, row, player, RELEASE_Y, 0);
+    this.place(col, row, player, RELEASE_Y, 0);
     this.discMesh.count = this.discCount;
 
     // Seeded per cell so two drops into the same column never rattle
     // identically, but the same move always replays the same way — the
     // screenshot harness depends on that.
     const track = new DropTrack(RELEASE_Y, restY, undefined, idx);
-    this.drops.push({ col, row, player, instance: slot, track, t: 0, nextImpact: 0, resolve });
+    this.drops.push({ col, row, player, track, t: 0, nextImpact: 0, resolve });
     this.syncProxies();
   }
 
@@ -887,16 +915,23 @@ class BoardScene implements SceneBoardView {
       // Perfectly still. The stillness is the weight cue; a bobbing ghost is
       // the toy version of this object.
       this.ghostMat.setOpacity(this.hoverAlpha);
-    } else if (this.thinking) {
-      // The AI is choosing: the same ghost, centred, dimmer, and equally still.
-      // The only life it has is the 1.8 s breath the win sequence also uses.
+    } else if (this.thinking || this.thinkingFade > 0) {
+      // The AI is choosing: the same ghost, centred over the board, dimmer, and
+      // equally still. The only life it has is the 1.8 s breath the win sequence
+      // also uses — the bible's rule is that nothing wiggles for attention, and
+      // an indicator that jitters would be exactly that.
+      this.thinkingFade = clamp01(
+        this.thinkingFade + ((this.thinking ? 1 : -1) * dt * 1000) / 240,
+      );
       this.thinkingPhase = this.reducedMotion ? 0.25 : (this.thinkingPhase + dt / 1.8) % 1;
       const breath = 0.35 + (this.reducedMotion ? 0 : 0.05 * Math.sin(this.thinkingPhase * Math.PI * 2));
       this.ghost.position.set(0, FEED_GHOST_Y, 0);
+      // No player is named by `setThinking`, so the colour is inferred: the side
+      // that did not just move is the side about to.
       this.ghostMat.setColour(
         this.lastMover === Player.One ? PALETTE.petrolGlow : PALETTE.emberGlow,
       );
-      this.ghostMat.setOpacity(breath);
+      this.ghostMat.setOpacity(breath * EASE.hover(this.thinkingFade));
     } else {
       this.ghostMat.setOpacity(this.hoverAlpha);
     }
@@ -952,7 +987,6 @@ class BoardScene implements SceneBoardView {
 
   setThinking(thinking: boolean): void {
     this.thinking = thinking;
-    if (!thinking) this.thinkingPhase = 0;
   }
 
   rejectColumn(col: number): void {
@@ -1011,7 +1045,13 @@ class BoardScene implements SceneBoardView {
         },
       );
     }
-    this.treat.needsUpdate = true;
+    // Only re-upload when something actually moved. An idle board would
+    // otherwise push the attribute buffer to the GPU on every frame for the
+    // rest of the game.
+    if (this.treatDirty) {
+      this.treat.needsUpdate = true;
+      this.treatDirty = false;
+    }
 
     this.backdrop.setGrade(house.desaturation, house.darken);
     // The tabletop is graded through its albedo tint rather than a uniform:
@@ -1041,6 +1081,14 @@ class BoardScene implements SceneBoardView {
   private writeTreatment(slot: number, t: DiscTreatment): void {
     const a = this.treat.array as Float32Array;
     const i = slot * 4;
+    if (
+      a[i] !== t.ignition ||
+      a[i + 1] !== t.desaturation ||
+      a[i + 2] !== t.darken ||
+      a[i + 3] !== t.roughnessBias
+    ) {
+      this.treatDirty = true;
+    }
     a[i] = t.ignition;
     a[i + 1] = t.desaturation;
     a[i + 2] = t.darken;
@@ -1095,6 +1143,27 @@ class BoardScene implements SceneBoardView {
     return new Promise<void>((resolve) =>
       this.frameWaiters.push({ at: this.frameIndex + n, resolve }),
     );
+  }
+
+  /**
+   * Jump every animation to its resting state (see `BoardView.snapAnimations`).
+   *
+   * Drops are finished by sampling each track past its end rather than by
+   * cancelling it, so a snapped disc lands exactly where a watched one would —
+   * the harness must never photograph a position the game could not reach.
+   */
+  snapAnimations(): void {
+    this.rig.snapToRest();
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      // Place the disc where its own track says it ends, rather than
+      // cancelling the drop — the harness must never photograph a resting
+      // position the simulation would not actually have produced.
+      this.place(d.col, d.row, d.player, d.track.restY, 0);
+      d.resolve?.();
+      this.drops.splice(i, 1);
+    }
+    this.syncProxies();
   }
 
   settle(): Promise<void> {
