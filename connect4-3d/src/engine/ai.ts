@@ -7,7 +7,7 @@
  * a per-side history heuristic. Move ordering starts centre-out and is then
  * improved by the TT move and the killers.
  *
- * Two Connect Four specific prunings do most of the heavy lifting:
+ * Three Connect Four specific shortcuts do most of the heavy lifting:
  *   - if the side to move has an immediate four, return the mate at once;
  *   - if the opponent has two *separate* immediate fours, the position is
  *     lost, because only one of them can be covered;
@@ -75,8 +75,14 @@ const TT_FLAG_UPPER = 2;
 const ttKeyLo = new Int32Array(TT_SIZE);
 const ttKeyHi = new Int32Array(TT_SIZE);
 const ttScore = new Int32Array(TT_SIZE);
-/** depth (6 bits) | flag (2 bits) | move+1 (4 bits) */
+/** depth (6 bits) | flag (2 bits) | move+1 (4 bits) | generation (8 bits) */
 const ttMeta = new Int32Array(TT_SIZE);
+/**
+ * Bumped once per search. Replace-by-depth alone would let a long session silt
+ * the table up with deep entries that newer, shallower searches can never
+ * displace; an entry from an older generation is always fair game.
+ */
+let generation = 0;
 
 const killers = new Int32Array(MAX_PLY * 2);
 const historyHeur = new Int32Array(2 * COLS);
@@ -229,6 +235,7 @@ export function clearTranspositionTable(): void {
   ttKeyHi.fill(0);
   ttScore.fill(0);
   ttMeta.fill(0);
+  generation = 0;
 }
 
 function bumpHistory(slot: number, depth: number): void {
@@ -393,12 +400,14 @@ function negamax(board: Board, depth: number, alphaIn: number, beta: number, ply
   if (
     occupied === 0 ||
     (occupied === keyLo && ttKeyHi[idx] === keyHi) ||
+    ((ttMeta[idx] >>> 12) & 255) !== generation ||
     (ttMeta[idx] & 63) <= depth
   ) {
     ttKeyLo[idx] = keyLo;
     ttKeyHi[idx] = keyHi;
     ttScore[idx] = toTT(best, ply);
-    ttMeta[idx] = (depth & 63) | (flag << 6) | (((bestMove + 1) & 15) << 8);
+    ttMeta[idx] =
+      (depth & 63) | (flag << 6) | (((bestMove + 1) & 15) << 8) | (generation << 12);
   }
   return best;
 }
@@ -471,10 +480,14 @@ function searchRoot(
   exactScores: boolean,
 ): RootResult {
   nodes = 0;
+  generation = (generation + 1) & 255;
   killers.fill(-1);
   historyHeur.fill(0);
   deadline = Infinity;
   const started = nowMs();
+  // Aborting unwinds through negamax's recursion, skipping its `undo()` calls,
+  // so the board has to be rewound to where the caller left it.
+  const baseline = board.moveCount;
 
   const limit = Math.min(maxDepth, CELLS - board.moveCount);
   let order = board
@@ -487,28 +500,31 @@ function searchRoot(
   let scores: number[] = new Array<number>(COLS).fill(-INF);
   let completed = 0;
 
-  for (let d = 1; d <= limit; d++) {
-    // Depth 1 is unabortable so there is always a completed iteration to use.
-    if (d === 2) deadline = started + budgetMs;
-    // Do not open an iteration there is no realistic chance of finishing.
-    if (d > 1 && nowMs() - started > budgetMs * 0.45) break;
-    try {
-      const iter = rootIteration(board, d, order, exactScores);
-      completed = d;
-      bestMove = iter.move;
-      bestScore = iter.score;
-      bestPv = iter.pv;
-      scores = iter.scores;
-      order = iter.order;
-    } catch (e) {
-      if (e !== ABORT) throw e;
-      break;
+  try {
+    for (let d = 1; d <= limit; d++) {
+      // Depth 1 is unabortable so there is always a completed iteration to use.
+      if (d === 2) deadline = started + budgetMs;
+      if (d > 1 && nowMs() >= deadline) break;
+      try {
+        const iter = rootIteration(board, d, order, exactScores);
+        completed = d;
+        bestMove = iter.move;
+        bestScore = iter.score;
+        bestPv = iter.pv;
+        scores = iter.scores;
+        order = iter.order;
+      } catch (e) {
+        if (e !== ABORT) throw e;
+        break; // the whole iteration is discarded, not half-used
+      }
+      // A forced result cannot improve with more depth.
+      if (bestScore >= MATE_THRESHOLD || bestScore <= -MATE_THRESHOLD) break;
     }
-    // A forced result cannot improve with more depth.
-    if (bestScore >= MATE_THRESHOLD || bestScore <= -MATE_THRESHOLD) break;
+  } finally {
+    while (board.moveCount > baseline) board.undo();
+    deadline = Infinity;
   }
 
-  deadline = Infinity;
   return { move: bestMove, score: bestScore, depth: completed, nodes, pv: bestPv, scores };
 }
 
@@ -524,7 +540,7 @@ const MEDIUM_NOISE_WINDOW = 25;
 /** How often easy actually covers an immediate threat. */
 const EASY_BLOCK_RATE = 0.6;
 /** Spread of easy's random tie-breaking, in evaluation points. */
-const EASY_NOISE = 46;
+const EASY_NOISE = 78;
 /** Easy's mild preference for the middle of the board. */
 const EASY_CENTRE: readonly number[] = [0, 6, 12, 18, 12, 6, 0];
 
@@ -695,20 +711,27 @@ export function chooseMove(board: Board, opts: SearchOptions): AiDecision {
 
   const rng = opts.rng ?? Math.random;
   const budget = opts.timeBudgetMs ?? DEFAULT_BUDGET[opts.difficulty];
+  // The search plays and unplays on the caller's board; whatever happens, it
+  // must hand it back untouched.
+  const baseline = board.moveCount;
 
   let decision: AiDecision;
-  switch (opts.difficulty) {
-    case 'easy':
-      decision = chooseEasy(board, rng);
-      break;
-    case 'medium':
-      decision = chooseMedium(board, budget, rng);
-      break;
-    case 'hard':
-      decision = chooseHard(board, budget);
-      break;
-    default:
-      throw new Error(`chooseMove: unknown difficulty ${String(opts.difficulty)}`);
+  try {
+    switch (opts.difficulty) {
+      case 'easy':
+        decision = chooseEasy(board, rng);
+        break;
+      case 'medium':
+        decision = chooseMedium(board, budget, rng);
+        break;
+      case 'hard':
+        decision = chooseHard(board, budget);
+        break;
+      default:
+        throw new Error(`chooseMove: unknown difficulty ${String(opts.difficulty)}`);
+    }
+  } finally {
+    while (board.moveCount > baseline) board.undo();
   }
 
   // Last line of defence: a bug in the search must never crash the game.
