@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-ssr/
+# Screenshot harness output — regenerate with `npm run shots`.
+shots/
+# Capacitor native projects are scaffolded on the developer's Mac.
+ios/
+android/
+*.local
+.DS_Store

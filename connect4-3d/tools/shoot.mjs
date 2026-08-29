@@ -1,0 +1,217 @@
+/**
+ * Visual capture harness.
+ *
+ * Boots the built game in headless Chromium, drives it through `window.__c4`
+ * (the debug hook installed by src/main.ts), and writes PNGs to `shots/`.
+ * This is how the look of the game gets reviewed: against real frames, at real
+ * device resolutions, rather than by imagining what the shader does.
+ *
+ *   node tools/shoot.mjs                    # every scene, both devices
+ *   node tools/shoot.mjs --scene=midgame    # one scene
+ *   node tools/shoot.mjs --device=ipad      # one device
+ *   node tools/shoot.mjs --url=http://…     # against an already-running server
+ *
+ * Rendering is SwiftShader here, so frames are slow but pixel-accurate. Timings
+ * printed by this tool say nothing about real GPU performance.
+ */
+import { chromium } from 'playwright';
+import { spawn } from 'node:child_process';
+import { mkdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SHOTS = path.join(ROOT, 'shots');
+
+const CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const LAUNCH_ARGS = [
+  '--use-gl=angle',
+  '--use-angle=swiftshader',
+  '--enable-unsafe-swiftshader',
+  '--ignore-gpu-blocklist',
+  '--disable-dev-shm-usage',
+  '--hide-scrollbars',
+  '--mute-audio',
+];
+
+/** Logical sizes and DPR of the two devices this game targets. */
+const DEVICES = {
+  mac: { width: 1440, height: 900, deviceScaleFactor: 2, isMobile: false, hasTouch: false },
+  ipad: { width: 1180, height: 820, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+};
+
+/**
+ * Each scene drives the game into a state worth looking at. The body runs in
+ * the page with `__c4` in scope, and resolves once the scene has settled.
+ */
+const SCENES = {
+  /** Opening menu — first impression, title treatment, material read. */
+  menu: async (c4) => {
+    await c4.reset({ difficulty: 'medium', showMenu: true });
+    await c4.settle();
+  },
+
+  /** Empty board, in play. Shows the set, lighting, and board material. */
+  empty: async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.settle();
+  },
+
+  /** A believable midgame. The main "is this pretty" reference frame. */
+  midgame: async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 3, 4, 2, 4, 4, 2, 5, 1, 2]);
+    await c4.settle();
+  },
+
+  /** Mid-drop: catches a disc in the air with motion blur and contact shadow. */
+  dropping: async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 3, 4, 2, 4, 4]);
+    await c4.settle();
+    await c4.beginDrop(2);
+    await c4.frames(9);
+  },
+
+  /** Easy mode teaching overlay: 2s and 3s marked for both colours. */
+  teaching: async (c4) => {
+    await c4.reset({ difficulty: 'easy', teaching: true });
+    await c4.playMoves([3, 0, 4, 1, 2, 0, 5, 6]);
+    await c4.settle();
+  },
+
+  /** The moment a win resolves — winning line lit, rest of board receding. */
+  win: async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 0, 4, 1, 5, 0, 6]);
+    await c4.settle();
+    await c4.frames(48);
+  },
+
+  /** Long after the win, once the celebration has settled into its resting state. */
+  'win-settled': async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 0, 4, 1, 5, 0, 6]);
+    await c4.settle();
+    await c4.frames(150);
+  },
+};
+
+function parseArgs(argv) {
+  const out = { scene: null, device: null, url: null };
+  for (const a of argv.slice(2)) {
+    const m = /^--([a-z]+)=(.*)$/.exec(a);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+/** Serve `dist/` with vite preview, resolving once it prints a URL. */
+function startServer() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('npx', ['vite', 'preview', '--port', '4173', '--strictPort'], {
+      cwd: ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let settled = false;
+    const onData = (buf) => {
+      const s = buf.toString();
+      const m = /(http:\/\/localhost:\d+)/.exec(s);
+      if (m && !settled) {
+        settled = true;
+        resolve({ proc, url: m[1] });
+      }
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('exit', (code) => {
+      if (!settled) reject(new Error(`vite preview exited with code ${code}`));
+    });
+    setTimeout(() => {
+      if (!settled) reject(new Error('vite preview did not start within 30s'));
+    }, 30_000);
+  });
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  const sceneNames = args.scene ? args.scene.split(',') : Object.keys(SCENES);
+  const deviceNames = args.device ? args.device.split(',') : Object.keys(DEVICES);
+
+  for (const s of sceneNames) {
+    if (!SCENES[s]) throw new Error(`unknown scene "${s}" (have: ${Object.keys(SCENES).join(', ')})`);
+  }
+  for (const d of deviceNames) {
+    if (!DEVICES[d]) throw new Error(`unknown device "${d}" (have: ${Object.keys(DEVICES).join(', ')})`);
+  }
+
+  await rm(SHOTS, { recursive: true, force: true });
+  await mkdir(SHOTS, { recursive: true });
+
+  let server = null;
+  let url = args.url;
+  if (!url) {
+    server = await startServer();
+    url = server.url;
+  }
+
+  const browser = await chromium.launch({ executablePath: CHROME, args: LAUNCH_ARGS });
+  const failures = [];
+
+  try {
+    for (const deviceName of deviceNames) {
+      const context = await browser.newContext({
+        ...DEVICES[deviceName],
+        colorScheme: 'dark',
+        reducedMotion: 'no-preference',
+      });
+      const page = await context.newPage();
+
+      const consoleErrors = [];
+      page.on('console', (m) => {
+        if (m.type() === 'error') consoleErrors.push(m.text());
+      });
+      page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
+
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => window.__c4?.ready === true, null, { timeout: 180_000 });
+
+      for (const sceneName of sceneNames) {
+        const t0 = Date.now();
+        await page.evaluate(
+          async ([name, body]) => {
+            const fn = new Function('c4', `return (${body})(c4)`);
+            await fn(window.__c4);
+          },
+          [sceneName, SCENES[sceneName].toString()],
+        );
+
+        const file = path.join(SHOTS, `${sceneName}-${deviceName}.png`);
+        await page.screenshot({ path: file });
+        console.log(`  ${path.relative(ROOT, file)}  (${Date.now() - t0}ms)`);
+      }
+
+      if (consoleErrors.length) {
+        failures.push(`[${deviceName}] ${consoleErrors.length} console error(s):`);
+        for (const e of consoleErrors.slice(0, 12)) failures.push(`    ${e}`);
+      }
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+    if (server) server.proc.kill();
+  }
+
+  if (failures.length) {
+    console.error('\nPage reported errors:');
+    for (const f of failures) console.error(f);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAll scenes captured with no console errors.');
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

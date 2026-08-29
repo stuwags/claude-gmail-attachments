@@ -1,0 +1,31 @@
+{
+  "name": "connect4-3d",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A photorealistic 3D Connect 4 with a teaching-oriented AI, built for macOS and iPadOS.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "cap:sync": "npm run build && cap sync",
+    "cap:ios": "npm run build && cap sync ios && cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "n8ao": "^2.0.1",
+    "postprocessing": "^6.39.4",
+    "three": "~0.185.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@types/three": "^0.185.4",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vite-plugin-pwa": "^1.3.0"
+  }
+}
