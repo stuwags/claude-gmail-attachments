@@ -37,6 +37,8 @@ interface DebugHook {
   playMoves(cols: number[]): Promise<void>;
   beginDrop(col: number): Promise<void>;
   settle(): Promise<void>;
+  /** Park the camera at a parallax extreme (-1..1 each axis) and snap to it. */
+  setParallax(x: number, y: number): Promise<void>;
   frames(n: number): Promise<void>;
   stats(): unknown;
   /** Current game state, for functional smoke tests. */
@@ -195,6 +197,19 @@ async function boot(): Promise<void> {
       view.beginDrop(col, board.heightOf(col), board.toMove);
     },
     settle: () => view.settle(),
+    /**
+     * Park the camera at a parallax extreme, or release it.
+     *
+     * The rig chases the pointer through a critically damped spring, so a
+     * screenshot taken right after setting parallax catches it mid-flight.
+     * This sets the target and then snaps, which is the only way to photograph
+     * an extreme rather than a journey toward one.
+     */
+    async setParallax(x, y) {
+      view.setParallax(x, y);
+      view.snapAnimations();
+      await view.waitFrames(1);
+    },
     state: () => {
       const board = controller.position;
       const snapshot = controller.snapshot();

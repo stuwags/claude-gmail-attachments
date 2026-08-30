@@ -10,6 +10,8 @@
  *   node tools/shoot.mjs --scene=midgame    # one scene
  *   node tools/shoot.mjs --device=ipad      # one device
  *   node tools/shoot.mjs --url=http://…     # against an already-running server
+ *   node tools/shoot.mjs --dpr=1            # iteration pass; 2 is the review pass
+ *   node tools/shoot.mjs --reduced=1        # the prefers-reduced-motion build
  *
  * Rendering is SwiftShader here, so frames are slow but pixel-accurate. Timings
  * printed by this tool say nothing about real GPU performance.
@@ -116,6 +118,25 @@ const SCENES = {
     await c4.frames(48);
   },
 
+  /**
+   * The two parallax extremes. Between them they answer three separate
+   * acceptance questions: whether the backdrop still fills the frame at the
+   * limits of the camera's travel, whether the acrylic shows refraction at a
+   * grazing angle, and whether the corner discs gain and lose their catchlight
+   * windows as the reflection geometry swings — which is the payoff for letting
+   * an aperture clip a highlight honestly rather than compensating for it.
+   */
+  'parallax-max': async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 3, 4, 2, 4, 4, 2, 5, 1, 2]);
+    await c4.setParallax(1, 1);
+  },
+  'parallax-min': async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 3, 4, 2, 4, 4, 2, 5, 1, 2]);
+    await c4.setParallax(-1, -1);
+  },
+
   /** Long after the win, once the celebration has settled into its resting state. */
   'win-settled': async (c4) => {
     await c4.reset({ difficulty: 'medium' });
@@ -126,7 +147,7 @@ const SCENES = {
 };
 
 function parseArgs(argv) {
-  const out = { scene: null, device: null, url: null, dpr: null };
+  const out = { scene: null, device: null, url: null, dpr: null, reduced: null };
   for (const a of argv.slice(2)) {
     const m = /^--([a-z]+)=(.*)$/.exec(a);
     if (m) out[m[1]] = m[2];
@@ -201,7 +222,11 @@ async function main() {
         ...device,
         deviceScaleFactor: args.dpr ? Number(args.dpr) : device.deviceScaleFactor,
         colorScheme: 'dark',
-        reducedMotion: 'no-preference',
+        // --reduced=1 captures the prefers-reduced-motion build, where every
+        // pulse and drift must freeze at its midpoint while the board stays
+        // fully readable. It is a whole second look at the product, not a
+        // variant of one scene, so it is a context flag rather than a scene.
+        reducedMotion: args.reduced ? 'reduce' : 'no-preference',
       });
       const page = await context.newPage();
 
@@ -224,7 +249,8 @@ async function main() {
           [sceneName, SCENES[sceneName].toString()],
         );
 
-        const file = path.join(SHOTS, `${sceneName}-${deviceName}.png`);
+        const suffix = args.reduced ? '-reduced' : '';
+        const file = path.join(SHOTS, `${sceneName}-${deviceName}${suffix}.png`);
         // Generous: a frame of this scene costs tens of seconds on SwiftShader,
         // and Playwright's 30s default expects a compositor keeping up in real
         // time. This is a rendering-cost allowance, not a hang detector.

@@ -497,10 +497,13 @@ body {
   min-width: 0;
 }
 
-/* Whose move it is, in that player's colour (§8.2). Glow hues, not body
-   hues: #CE5A32 on the panel is only 3.9:1, the glow is about 9:1. */
+/* Ink, not the player's colour (§8.2): the accent belongs to the 3 px
+   indicator beside it, and the indicator alone is enough to say whose move it
+   is. Colouring the headline too made the single loudest piece of chrome
+   compete with the board for attention, and it put the product's one
+   contextual accent rule the wrong way round. */
 .c4-capsule__turn {
-  color: var(--c4-accent, var(--c4-ink));
+  color: var(--c4-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
