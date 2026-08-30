@@ -14,7 +14,9 @@
     "cap:ios": "npm run build && cap sync ios && cap open ios",
     "shots": "npm run build && node tools/shoot.mjs",
     "icons": "node tools/make-icons.mjs",
-    "smoke": "npm run build && node tools/smoke.mjs"
+    "smoke": "npm run build && node tools/smoke.mjs",
+    "build:standalone": "vite build --config vite.config.standalone.ts",
+    "build:artifact": "npm run build:standalone && node tools/make-artifact.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",
@@ -29,7 +31,8 @@
     "playwright": "^1.62.1",
     "typescript": "^5.9.0",
     "vite": "^7.1.0",
-    "vite-plugin-pwa": "^1.3.0"
+    "vite-plugin-pwa": "^1.3.0",
+    "vite-plugin-singlefile": "^2.3.3"
   },
   "engines": {
     "node": ">=20.19"

@@ -111,26 +111,43 @@ function discBodyRoughness(size = 256): DataTexture {
  * point — a smudge you can see when nothing is moving is a texture, not a
  * smudge.
  *
- * The groove break is §9 item 1's, and it is what lets the two-tier specular
- * clause hold honestly. A polished torus valley mirrors any small source
- * somewhere along its wall, so at the face's own clearcoat roughness the grooves
- * returned the catch card at 96-100 % of the window's own peak — measured 223-233
- * against windows of 226-234 — and became a second, competing highlight on every
- * disc. The fix is not to hide them but to give them the finish a recess
- * actually has: lacquer pools and dulls where it cannot level, which is the same
- * physical fact §3.1 already spends a 0.85 albedo AO ring on. +0.12 of clearcoat
- * roughness inside the groove walls broadens the lobe enough to drop the glint
- * under the window without touching the machined detail itself.
+ * The groove break is §9 item 1's: a recess is where lacquer pools and fails to
+ * level, so its clearcoat is duller than the face's — the same physical fact
+ * §3.1 already spends a 0.85 albedo AO ring on. +0.12 of clearcoat roughness
+ * inside the groove walls widens the lobe there by four times.
  *
  * Both live in one map because three multiplies the map into the scalar and map
  * values cannot exceed 1: the base has to be the *top* of the combined range.
  * Base 0.29 × map in [0.4138, 0.5862] is §3.1's 0.12-0.17 on the face, and
  * × [0.8276, 1.0] is 0.24-0.29 in the grooves. Painting it here rather than in a
- * second texture costs nothing — same map, same fetch, same memory.
+ * second texture costs nothing — same map, same fetch, same memory — and the
+ * rescale is free: measured, the window peaks are identical either side of it.
+ *
+ * **What the break is measured to do, which is almost nothing, and why that is
+ * the useful finding.** Midgame, rest pose, 1440x900 at DPR 1, ten discs, groove
+ * peak sampled by radius (11.3-12.7 mm and 16.3-17.7 mm) with the window and its
+ * halo excluded, break off then on:
+ *
+ * | groove | off | on |
+ * |---|---|---|
+ * | inner | 123-197 | 122-196 |
+ * | outer | 156-199 | 154-199 |
+ * | windows | 226-234 | 226-234 |
+ *
+ * Zero to seven code values, mean 1.4. The break is inert because the groove
+ * wall is *not* mirroring a small source: the raised-cosine section swings the
+ * normal through ±53°, so the wall finds the key softbox and the environment's
+ * key card at grazing incidence, and a source far larger than the lobe returns
+ * its own radiance whatever the roughness. It is kept because it is ruled, true,
+ * and free, and because it is the guard that holds if the catch card is ever
+ * enlarged or brightened into the grooves' reach — but nothing in the current
+ * frame depends on it, and the 93-99 % figure it was ruled against was the
+ * *window's own gradient tail* being counted as a second specular by an analysis
+ * whose exclusion disc was smaller than the window's streak.
  */
 function discClearcoatRoughness(
   bands: { v0: number; v1: number }[],
-  size = 512,
+  size = 256,
 ): DataTexture {
   const n = new SimplexNoise(4409);
   return buildTexture({ size }, (u, v, out) => {

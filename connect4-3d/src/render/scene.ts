@@ -524,8 +524,6 @@ class BoardScene implements SceneBoardView {
     await this.renderer.compileAsync(this.scene, this.camera);
     this.discMesh.count = 0;
     this.rig.playIntro();
-    // TEMP-MEASURE
-    (window as unknown as { __c4view: unknown }).__c4view = this;
   }
 
   private buildDiscs(disc: ReturnType<typeof createDiscGeometry>): void {

@@ -170,10 +170,36 @@ const RIM_ANGLE = 0.175;
 const RIM_PENUMBRA = 0.5;
 
 /**
- * Candela, pre-`RIG_SCALE`. Calibrated from the ruled starting point of 25 to
- * the delta acceptance: rim-on minus rim-off of at least +15 code on the right
- * stile's outer face and +8 on the back panel's upper-right quadrant, with at
- * most +0.5 on every slab third.
+ * Candela, pre-`RIG_SCALE`, left at the ruled starting value. Measured, empty
+ * scene, rest pose, 1440x900 at DPR 1, rim-on minus rim-off:
+ *
+ * | band | bloom on | bloom bypassed |
+ * |---|---|---|
+ * | right stile inner arris, upper | +48.4 | **+43.1** |
+ * | right stile inner arris, lower | +4.3 | +3.9 |
+ * | right stile front face, upper | +4.2 | **+0.1** |
+ * | right stile front face, lower | +0.1 | +0.1 |
+ * | back panel, upper-right quadrant | +3.8 | +0.4 |
+ * | slab thirds | +0.16 / +0.25 / +0.00 | **-0.03 / +0.08 / +0.03** |
+ *
+ * Two things in that table, and they are the whole result.
+ *
+ * **The flag holds exactly.** With bloom bypassed the beam's contribution to
+ * every slab third is zero to within the grain's standard error, at 25 and at
+ * 40 alike. Not "little": the cone boundary is a hard zero and the slab is
+ * outside it, so no roughness, Fresnel or lobe width can put a photon there.
+ * The pinned-locus table ratio is 1.56 against a floor of 1.25.
+ *
+ * **The rim lands on the arris, not on the face**, which is what §3.2 has always
+ * said it does — "the 0.8 mm chamfers are where the rim light lives". The
+ * stile's front face points at +Z; the fixture is at z = -1.45, 95° round from
+ * its normal, so `dot(N, L)` is negative and that face receives exactly zero at
+ * any intensity. Its +4.2 with bloom on is the skirt of the arris three pixels
+ * to its left, and the delta acceptance's +15 on that band is therefore only
+ * reachable by driving the fixture until bloom alone spills fifteen code values
+ * onto it — measured, about 141 candela, where the arris clips and hazes the
+ * backdrop. The back panel's quadrant is the same story for the same reason:
+ * the visible face of the back sheet is also +Z.
  */
 const RIM_INTENSITY = 25.0;
 

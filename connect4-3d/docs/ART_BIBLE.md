@@ -100,11 +100,13 @@ One warm softbox key, a cool ambient fill, a hard cool rim. Warm key against coo
 |---|---|---|---|---|---|---|
 | Key | `RectAreaLight` | 1.2 x 1.8 | (-0.85, 1.35, 0.95) | at target | `#FFF1E3` | 9.0 |
 | Fill | `RectAreaLight` | 2.5 x 2.5 | (1.6, 0.9, 0.6) | at target | `#D8E3EE` | 2.2 |
-| Rim | `RectAreaLight` | 0.25 x 0.40 (short vertical strip) | (0.70, 1.20, -1.30) | at (0, 0.30, 0) | `#EAF1FF` | 22.0 |
+| Rim | `SpotLight` | `angle` 0.175 rad, `penumbra` 0.5, `decay` 2, `distance` 0, no shadow map | (0.15, 0.05, -1.45) | at (0, 0.33, 0) | `#EAF1FF` | 25.0 |
 | Catch card | `RectAreaLight` | 0.09 x 0.14 (vertical) | (-0.12, 0.08, 1.05) | at (0, 0.19, 0) | `#FFF4EA` | 20.0 |
 | Shadow proxy | `DirectionalLight` | n/a | along key axis | at origin | `#FFF1E3` | 1.6 |
 
-Treat the ratios as canonical (key : fill : rim = 1 : 0.24 : 2.4). If overall brightness needs retuning, touch `toneMappingExposure` only.
+Treat the ratios as canonical (key : fill = 1 : 0.24). The rim carries candela where the area lights carry radiance, so it has no ratio to them; its acceptance is the delta in R14. If overall brightness needs retuning, touch `toneMappingExposure` only.
+
+**The rim invariant (R14).** The cone-axis elevation must exceed the cone half-angle: 10.87 degrees against 10.03 at this pose. While that holds, the beam's lower edge ascends from y = 0.05 and never returns to the slab, so the tabletop receives exactly zero from the rim at any roughness and any camera pose. Three's spot attenuation is zero outside `angle` and `penumbra` softens only inward, so this is a hard geometric boundary rather than a falloff. Re-derive it before moving the fixture.
 
 ### 2.2 Shadows
 
@@ -119,7 +121,7 @@ No HDR files. Build a `StudioEnvironment` scene, render once through `PMREMGener
 - Room: 4 x 3 x 4 m box, interior albedo `#0C0D0F`, `side: BackSide`.
 - Key card: 1.2 x 1.8 plane, emissive `#FFF1E3`, intensity 20, at the key light's position and orientation.
 - Fill card: 2.5 x 2.5 plane, emissive `#D8E3EE`, intensity 1.5, at the fill's position. (Was 4.5: 6.25 m2 hanging on the rim's side, double-counting the analytic fill that already carries the canonical 0.24.)
-- Rim card: 0.3 x 0.5 plane, emissive `#EAF1FF`, intensity 32, at the rim's position (cards mirror the rig, so it moves with the rim).
+- **The rim card is struck** (R14). A PMREM lookup is indexed by direction alone and cannot be flagged off a surface, so the one thing this card could not do was stay off the slab; measured on its own it put +2.1 / +4.6 / +9.2 code values across the table thirds. The surfaces it served — rear-facing metal and the back sheet — are what the analytic spot now lights, and nothing forward-facing was ever in its mirror path.
 - The catch card gets **no** environment copy. A PMREM copy of it re-clones the highlight and double-counts the energy; it is analytic only.
 - Horizon card: 3.0 x 1.6 plane behind the camera at y = 0.15, emissive `#35302A`, intensity 1.2. (Enlarged and lowered: aluminium is metalness 1.0, so a front-facing rail shows only what the environment holds in its mirror direction, and at y = 0.4 the card sat entirely above that path.) This is what puts a long warm streak in the tabletop sheen.
 
@@ -141,7 +143,7 @@ The feel brief is kiln ceramic under a piano-lacquer clearcoat: a satin colored 
 | `roughness` | 0.34 | 0.34 |
 | `metalness` | 0.0 | 0.0 |
 | `clearcoat` | 1.0 | 1.0 |
-| `clearcoatRoughness` | 0.12 | 0.12 |
+| `clearcoatRoughness` | 0.12 face / 0.24 groove | 0.12 face / 0.24 groove |
 | `ior` | 1.5 | 1.5 |
 | `specularIntensity` | 1.0 | 1.0 |
 | `sheen` / `iridescence` / `transmission` | 0 / 0 / 0 | 0 / 0 / 0 |
@@ -154,6 +156,7 @@ Micro-detail, all procedural:
 - Orange peel: 512 x 512 simplex-noise height field, feature size about 0.5 mm on the disc, converted to a normal map, applied as `clearcoatNormalMap` with `clearcoatNormalScale (0.06, 0.06)`. This is what makes lacquer read as lacquer; highlights should wobble slightly as the camera parallaxes.
 - Body speckle: `roughnessMap` from 2-octave value noise, plus/minus 0.04 around base roughness, feature size 0.3 mm.
 - Smudge pass: 3-octave Perlin at very low frequency (2 features per disc face) added to `clearcoatRoughness` in patches of +0.05. Visible only when a highlight sweeps across; at rest it must be invisible. This is the fingerprint note, and subtlety is the entire point.
+- Groove roughness break: +0.12 `clearcoatRoughness` inside the two lathed groove walls, painted into the same generated map as the smudge. Lacquer pools and fails to level in a recess, which is the same physical fact the 0.85 albedo AO ring below is spending itself on. See R15: measured, it moves the groove's specular by at most 7 code values, because the groove wall reflects sources far larger than its lobe. It is kept as the guard that holds if the catch card is ever enlarged, not as load-bearing.
 - No scratches, no edge grime. This object is new. Wear is expressed only as a 0.85x albedo AO ring baked into the lathed grooves (multiply the groove interior in the generated albedo map).
 
 ### 3.2 Board, smoked acrylic in a machined frame
@@ -388,7 +391,7 @@ Accents: contextual UI (turn capsule, coach chip states) uses the relevant playe
 
 Binary checks, each verifiable from screenshots of a Tier A build (items 17 and 18 from a device run). All 18 must pass.
 
-1. Each disc face carries exactly one soft-edged rectangular catchlight, 10-16 mm on its long axis, peak 230-250, with an edge gradient at least 3 px wide and no hard clip boundary. Its position varies monotonically across the rows and drifts under camera parallax. No other specular on the disc exceeds 60 percent of the window's peak. Face body outside the window stays within 0.01 scene-linear of its card-off value.
+1. Each disc face carries exactly one soft-edged rectangular catchlight, 10-16 mm on its long axis, peak 230-250, with an edge gradient at least 3 px wide and no hard clip boundary. Its position varies monotonically across the rows and drifts under camera parallax. Aperture-clipped windows are correct: a real recessed disc vignettes its own reflections. The second-specular clause is two-tier (R15): **the two lathed grooves may reach 80 percent of the window's peak; every other specular on the disc stays under 60 percent.** Groove peaks target 170-205 code against 231-238 windows — present and jewel-like, but subordinate. Face body outside the window stays within 0.01 scene-linear of its card-off value, measured pre-bloom.
 2. At 200 percent zoom, no polygonal faceting on any disc rim or hole edge.
 3. Every visible edge carries a lit chamfer or fillet; zero razor edges anywhere in frame. The right rail's chamfer line is continuous with no segment below 60 code. (An evenly lit arris is how CG looks; a ramp is how light behaves, so the ramp is accepted.)
 4. Discs seen through the front panel are visibly hazed and cool-tinted by the smoke, and refraction is visible at a grazing camera angle.
@@ -452,3 +455,15 @@ So the object changes. A 1.4 mm crown buys plus or minus 7.6 degrees of face-nor
 **The design law, stated once so it outlives this build: window brightness scales with radiance, body wash scales with flux.** Small-and-bright is the only corner of that trade where items 1 and 14 coexist.
 
 **R13 — The right rail's stepping and blue fringe are closed, not defects.** The 44-row stepping is a 1-px near-vertical specular line crossing pixel boundaries, and gets its verdict on real hardware under MSAA rather than on a software rasteriser. The 1-px blue fringe is chromatic aberration doing exactly what §4.5 specifies at a high-contrast near-vertical edge. No modelling change, no CA change.
+
+**R14 — The rim changes species, R11's 8 degree governing rule is repealed, and the environment rim card is struck.** The lobe argument in R11's own note is accepted as final: the slab is roughness 0.38 under a clearcoat at 0.35, so at 74 degrees off normal its lobe is tens of degrees wide, every behind-the-board azimuth lies inside it, and clearing it needs an emitter 3.4 m up — outside the 3 m room. No area-light rim can exist in this set and pass. The measured decomposition also showed the rim was buying +0.03 code values on the stile for +2.9 / +6.2 / +27.7 across the table thirds, so it was not earning its keep either.
+
+The escape is geometric rather than photometric. Three's spot attenuation is `smoothstep(cos(angle), cos(angle*(1-penumbra)), cos(theta))`, which is exactly zero outside `angle` — `penumbra` softens only inward — so a cone is a hard boundary no BRDF can leak across. The rim becomes a `SpotLight` low behind the board aimed *upward*, with the invariant in section 2.1: cone-axis elevation 10.87 degrees against a half-angle of 10.03, so the beam's lower edge ascends from y = 0.05 and never returns to the slab.
+
+Measured, empty scene, rest pose, 1440x900 at DPR 1, rim-on minus rim-off, with the post chain's bloom bypassed to separate the fixture from its halo: **every slab third moves by -0.03 / +0.08 / +0.03 — zero within the grain's standard error, at 25 candela and at 40 alike.** The pinned-locus table ratio is 1.56 against R2's floor of 1.25, up from 0.76 under the old rim. The wash is gone, not reduced.
+
+What the rim buys is the arris, which is what section 3.2 always said it was for: **+43 code values on the right stile's inner chamfer, upper half**, and a continuous cool chamfer line down both stiles and around every aperture where there was a dull edge before. What it cannot buy is the stile's *front face*: that surface points at +Z and the fixture is at z = -1.45, 95 degrees round from its normal, so it receives exactly zero at any intensity and its +4.2 in a bloom-on frame is the skirt of the arris three pixels away. The delta acceptance drafted against that face (+15 code) is therefore reachable only by driving the fixture to about 141 candela so bloom alone spills fifteen code values onto it, and at 141 the arris clips and hazes the backdrop. **The rim is graded on the arris; the face is not a locus a back light can serve.** Intensity stays at the ruled 25.
+
+**R15 — Item 1's second-specular clause splits, and the groove's roughness break is kept as a guard rather than as a fix.** A polished torus groove mirrors whatever its wall can reach, and the raised-cosine section swings the normal through plus or minus 53 degrees, so banning any second specular over 60 percent banned the machined detail section 1.2 asks for. The clause becomes two-tier: grooves to 80 percent, everything else to 60.
+
+The +0.12 clearcoat-roughness break inside the groove walls is implemented, in the same generated map as the smudge pass, and it is measured to be inert: groove peaks move by 0 to 7 code values, mean 1.4. Two findings behind that. The grooves were never the problem — measured by radius with the window and its halo excluded, they run 122-199 code against windows of 226-234, already inside the 170-205 target. The 93-99 percent figure the clause was re-litigated against was an analysis artefact: the window is an elongated streak and the exclusion disc around it was smaller than its gradient tail, so the window's own shoulder was being counted as a second specular. And roughness cannot dim these glints anyway, because the wall is finding the key softbox and the environment key card at grazing incidence, and a source larger than the lobe returns its own radiance at any roughness.

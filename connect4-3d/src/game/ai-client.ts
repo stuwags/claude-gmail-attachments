@@ -27,6 +27,8 @@ export class AiClient {
   >();
   /** Set when worker construction failed; we search on the main thread instead. */
   private inlineFallback = false;
+  /** True while a cancel is in flight, so a cancelled search is not retried inline. */
+  private cancelled = false;
 
   constructor() {
     try {
@@ -55,10 +57,22 @@ export class AiClient {
       seed: opts.seed,
     };
 
-    return new Promise<AiDecision>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.worker!.postMessage(request);
-    });
+    try {
+      return await new Promise<AiDecision>((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
+        this.worker!.postMessage(request);
+      });
+    } catch (err) {
+      // A worker that fails to load or dies mid-search must not cost the
+      // player a real move. Constructing it succeeded, so the failure only
+      // surfaces here — and the caller's own fallback is a *random* legal
+      // move, which would turn a grandmaster into a beginner without
+      // anything looking broken. Search inline instead: slower, identical
+      // strength. Cancellation is not a failure and is left to propagate.
+      if (this.cancelled) throw err;
+      this.inlineFallback = true;
+      return this.thinkInline(opts);
+    }
   }
 
   /**
@@ -66,7 +80,9 @@ export class AiClient {
    * answer is about to be meaningless.
    */
   cancel(): void {
+    this.cancelled = true;
     this.failAll(new Error('cancelled'), true);
+    this.cancelled = false;
   }
 
   dispose(): void {
