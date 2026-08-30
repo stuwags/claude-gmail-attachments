@@ -117,6 +117,17 @@ export interface BoardView {
   setQuality(tier: QualityTier): void;
 
   /**
+   * Disable named post effects so a reviewer can A/B them. Passing an empty
+   * array restores all. This is how §9's acceptance checks get verified rather
+   * than asserted — item 9 in particular is graded by differencing a frame
+   * against the same frame with bloom off.
+   *
+   * Names are the post chain's `BypassTarget` union; unknown ones are ignored,
+   * and a build with no chain at all is a no-op rather than a throw.
+   */
+  setPostBypass(targets: readonly string[]): void;
+
+  /**
    * Resolves after `n` rendered frames. The screenshot harness uses this to
    * step animations deterministically.
    */

@@ -39,6 +39,8 @@ interface DebugHook {
   settle(): Promise<void>;
   /** Park the camera at a parallax extreme (-1..1 each axis) and snap to it. */
   setParallax(x: number, y: number): Promise<void>;
+  /** Disable named post effects, for A/B acceptance checks. Empty restores all. */
+  setBypass(targets: readonly string[]): Promise<void>;
   frames(n: number): Promise<void>;
   stats(): unknown;
   /** Current game state, for functional smoke tests. */
@@ -209,6 +211,11 @@ async function boot(): Promise<void> {
       view.setParallax(x, y);
       view.snapAnimations();
       await view.waitFrames(1);
+    },
+    /** Disable named post effects, for the A/B acceptance checks. */
+    async setBypass(targets) {
+      view.setPostBypass(targets);
+      await view.waitFrames(2);
     },
     state: () => {
       const board = controller.position;

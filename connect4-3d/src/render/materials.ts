@@ -102,20 +102,57 @@ function discBodyRoughness(size = 256): DataTexture {
 }
 
 /**
- * The fingerprint note. Three octaves at roughly two features per disc face,
+ * Two things in one map: the fingerprint smudge, and the groove's roughness
+ * break.
+ *
+ * The smudge is §3.1's — three octaves at roughly two features per disc face,
  * lifting clearcoat roughness by up to +0.05 in patches. At rest it is
  * invisible; it only appears as a highlight sweeps across, which is the entire
  * point — a smudge you can see when nothing is moving is a texture, not a
  * smudge.
+ *
+ * The groove break is §9 item 1's, and it is what lets the two-tier specular
+ * clause hold honestly. A polished torus valley mirrors any small source
+ * somewhere along its wall, so at the face's own clearcoat roughness the grooves
+ * returned the catch card at 96-100 % of the window's own peak — measured 223-233
+ * against windows of 226-234 — and became a second, competing highlight on every
+ * disc. The fix is not to hide them but to give them the finish a recess
+ * actually has: lacquer pools and dulls where it cannot level, which is the same
+ * physical fact §3.1 already spends a 0.85 albedo AO ring on. +0.12 of clearcoat
+ * roughness inside the groove walls broadens the lobe enough to drop the glint
+ * under the window without touching the machined detail itself.
+ *
+ * Both live in one map because three multiplies the map into the scalar and map
+ * values cannot exceed 1: the base has to be the *top* of the combined range.
+ * Base 0.29 × map in [0.4138, 0.5862] is §3.1's 0.12-0.17 on the face, and
+ * × [0.8276, 1.0] is 0.24-0.29 in the grooves. Painting it here rather than in a
+ * second texture costs nothing — same map, same fetch, same memory.
  */
-function discClearcoatRoughness(size = 256): DataTexture {
+function discClearcoatRoughness(
+  bands: { v0: number; v1: number }[],
+  size = 512,
+): DataTexture {
   const n = new SimplexNoise(4409);
-  // Base 0.17 × map in [0.706, 1.0] = 0.12 to 0.17 effective.
   return buildTexture({ size }, (u, v, out) => {
     const patch = smoothstep(0.15, 0.75, n.fbm(u * 3, v * 3, 3) * 0.5 + 0.5);
-    out[0] = out[1] = out[2] = lerp(0.706, 1.0, patch);
+    let groove = 0;
+    for (const b of bands) {
+      // The same soft shoulders as the albedo ring, so the two land together
+      // and the lip of the groove is one transition rather than two.
+      const t =
+        smoothstep(b.v0, b.v0 + (b.v1 - b.v0) * 0.3, v) *
+        (1 - smoothstep(b.v1 - (b.v1 - b.v0) * 0.3, b.v1, v));
+      groove = Math.max(groove, t);
+    }
+    const effective = 0.17 * lerp(0.706, 1.0, patch) + DISC_GROOVE_CC_ROUGHNESS * groove;
+    out[0] = out[1] = out[2] = clamp01(effective / DISC_CC_ROUGHNESS_BASE);
   });
 }
+
+/** §9 item 1: the recess's roughness break, in effective clearcoat roughness. */
+const DISC_GROOVE_CC_ROUGHNESS = 0.12;
+/** Top of the combined range, so the map never has to exceed 1. */
+const DISC_CC_ROUGHNESS_BASE = 0.29;
 
 /**
  * Albedo: white everywhere except a 0.85× darkening inside the two lathed
@@ -480,7 +517,9 @@ export function createMaterials(
   const discRough = keep(discBodyRoughness());
   discRough.repeat.copy(clearcoatNormalMap.repeat);
 
-  const discCcRough = keep(discClearcoatRoughness());
+  const discCcRough = keep(discClearcoatRoughness(grooveBands));
+  // v must stay at 1: the groove break is painted at the profile's own arc-length
+  // coordinate, and any repeat on that axis would smear it across the face.
   discCcRough.repeat.set(2, 1);
 
   const discMap = keep(discAlbedo(grooveBands));
@@ -492,7 +531,7 @@ export function createMaterials(
     roughnessMap: discRough,
     metalness: 0.0,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.17,
+    clearcoatRoughness: DISC_CC_ROUGHNESS_BASE,
     clearcoatRoughnessMap: discCcRough,
     clearcoatNormalMap,
     ior: 1.5,

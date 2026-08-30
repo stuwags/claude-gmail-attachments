@@ -103,7 +103,7 @@ import {
   type GhostMaterial,
   type MaterialLibrary,
 } from './materials';
-import type { PostFX, PostState } from './post/types';
+import type { BypassTarget, PostFX, PostState } from './post/types';
 import { createPostFX } from './post/chain';
 import { createCoachOverlay } from './effects/coach';
 import { createOutcomeEffects } from './effects/outcome';
@@ -524,6 +524,8 @@ class BoardScene implements SceneBoardView {
     await this.renderer.compileAsync(this.scene, this.camera);
     this.discMesh.count = 0;
     this.rig.playIntro();
+    // TEMP-MEASURE
+    (window as unknown as { __c4view: unknown }).__c4view = this;
   }
 
   private buildDiscs(disc: ReturnType<typeof createDiscGeometry>): void {
@@ -1189,6 +1191,19 @@ class BoardScene implements SceneBoardView {
     this.post?.setQuality(tier);
     const size = this.renderer.getSize(this.scratchV2);
     this.resize(size.x, size.y, this.options.canvas.ownerDocument.defaultView?.devicePixelRatio ?? 1);
+  }
+
+  /**
+   * Bypass named post effects for the §9 A/B checks (`BoardView`).
+   *
+   * The names are widened to `string` at the interface because `api.ts` is the
+   * seam between the game and the renderer and must not know the chain's union;
+   * the chain itself ignores anything it does not recognise. A build whose post
+   * chain failed to construct — which is a supported mode, see `buildEffects` —
+   * has nothing to bypass and quietly does nothing.
+   */
+  setPostBypass(targets: readonly string[]): void {
+    this.post?.setBypass(targets as readonly BypassTarget[]);
   }
 
   waitFrames(n: number): Promise<void> {

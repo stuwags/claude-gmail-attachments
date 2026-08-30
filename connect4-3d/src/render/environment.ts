@@ -40,6 +40,7 @@ import {
   Scene,
   ShaderMaterial,
   SphereGeometry,
+  SpotLight,
   UnsignedByteType,
   Vector3,
   type Texture,
@@ -113,39 +114,12 @@ const HORIZON_COLOR = 0x35302a;
 const TARGET = new Vector3(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);
 
 /**
- * The rim strip: short, high, and behind the board's upper half.
+ * The rim: a spotlight aimed *upward* from low behind the board.
  *
- * The authoring error was length *and* height. This camera sees the slab at
- * about 74° off its normal, so the tabletop is a near-mirror with a Fresnel of
- * roughly 0.23, and its mirror direction leaves the right-hand table at 15.7°
- * of elevation (about 18.7° at the pitch extreme of the parallax envelope). A
- * 1.6 m strip centred at y = 0.55 spanned 0.35-0.75 m, whose lower edge sits
- * around 11° from a right-third table point — inside that band, so every unit of
- * rim radiance came back off the table as a 218-code streak and no intensity
- * could pass both §9's table ratio and §10 R10's stile and rail bands.
- *
- * The escape is elevation, not azimuth: every behind-the-board azimuth lies in
- * some visible pixel's mirror path at low elevation, so the strip has to clear
- * the band entirely rather than dodge sideways. Shortened to 0.40 m and raised
- * to span y 1.00-1.40, the worst visible table corner (about (1.2, 0, 1.0),
- * 2.35 m away in plan) sees its lower edge at 23.1°, roughly 4.4° of margin.
- *
- * **The governing rule, so this cannot recur:** no luminaire, analytic or
- * environment card, may present its lower edge within 8° above the slab's
- * reflected-view elevation from any visible table pixel at any pose in the
- * parallax envelope. §2.3's horizon card is the one designed exception — it is
- * *meant* to live in that mirror path and put the long warm streak in the slab.
- *
- * Intensity is radiance for an area light, not flux, so cutting the strip from
- * 0.40 m² to 0.10 m² removes three quarters of the table-washing flux while the
- * reflected line down the stiles keeps its full brightness. That asymmetry is
- * the whole trick, and it is what lets §2.1's canonical 1 : 0.24 : 2.4 stand as
- * written.
- *
- * **Measured at this position, and escalated: the strip still washes the table
- * and still reaches nothing the camera can see.** Empty scene, rest pose,
- * 1440x900 at DPR 1, four-render decomposition against the same rig with the
- * rim system extinguished:
+ * **Why it is no longer an area light.** Three stagings of a `RectAreaLight`
+ * behind the board all failed the same way, and the last one was measured to
+ * exhaustion — empty scene, rest pose, 1440x900 at DPR 1, four-render
+ * decomposition against the same rig with the rim system extinguished:
  *
  * | band | rim off | +light only | +card only | both |
  * |---|---|---|---|---|
@@ -155,38 +129,53 @@ const TARGET = new Vector3(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2])
  * | right stile   | 70.8 | 70.8 | 70.8 | 70.8 |
  * | top rail      | 110.7 | 111.0 | 111.0 | 110.7 |
  *
- * So the rim-only table contribution is +2.9 / +6.2 / +27.7 code values against
- * a ceiling of 1, the left/right ratio at the pinned locus falls from 1.56 to
- * 0.76 against a floor of 1.25, and the object gains 0.03 code values on the
- * stile and 0.00 on the rail.
+ * All of the cost on the table, +0.03 code values on the object. The reason is
+ * lobe width rather than placement: §3.3 gives the slab roughness 0.38 under a
+ * clearcoat at 0.35, and a GGX lobe of that width seen at 74° off normal is
+ * stretched across tens of degrees of elevation. Every behind-the-board azimuth
+ * lies in some visible table pixel's lobe, and clearing it would need the strip
+ * some 40° above the specular direction — 3.4 m up at the far corner's plan
+ * distance, outside §2.3's 3 m room, and lighting the top rail by then.
  *
- * The 8° rule is derived for a mirror, and the slab is not one: §3.3 gives it
- * roughness 0.38 under a clearcoat at 0.35, and a GGX lobe of that width seen at
- * 74° off normal is stretched across tens of degrees of elevation, not eight. A
- * strip whose lower edge clears the specular direction by 7-8° is still well
- * inside the lobe, which is why raising it from y 0.35-0.75 to y 1.00-1.40 moved
- * the wash from the right third's foreground to its background without removing
- * it. Clearing that lobe would need the lower edge some 40° above the specular
- * direction — about 3.4 m up at the far corner's plan distance, outside §2.3's
- * 3 m room, and by then the strip is overhead and lighting the top rail rather
- * than the stiles.
+ * **R11's 8° governing rule is therefore repealed** (§10 R14). It was derived
+ * for a mirror, the slab is not one, and no elevation inside the room satisfies
+ * the lobe it was standing in for.
  *
- * Left as ruled, because the escape is the art director's to issue and this rig
- * has now been re-staged twice on the same wrong premise. The measurement above
- * is what the next ruling needs: the rim's cost is entirely on the table and its
- * benefit at any position behind the board is zero, because the only visible
- * face on that side is the right stile's 45° chamfer, whose mirror direction is
- * +X and level — 76° away from this strip.
+ * **The escape is geometric, not photometric: a table cannot be washed by a beam
+ * that never descends.** Three's `getSpotAttenuation` is
+ * `smoothstep( cos(angle), cos(angle*(1-penumbra)), cos(theta) )`, which is
+ * *exactly* zero outside the cone — `penumbra` only softens inward — so the cone
+ * is a hard boundary that no BRDF, roughness or Fresnel term can leak across.
+ * Put the emitter below the board, aim it up, and keep the whole cone above the
+ * slab plane, and the slab receives zero rather than "little".
+ *
+ * **The invariant, so retuning cannot quietly break it: the cone-axis elevation
+ * must exceed the cone half-angle.** Here the axis runs (0.15, 0.05, -1.45) to
+ * (0, 0.33, 0), a rise of 0.28 over a plan distance of 1.458, so
+ * `atan(0.28 / 1.458)` = 10.87° against a half-angle of 0.175 rad = 10.03°.
+ * While that inequality holds the cone's lower edge climbs at 0.85° from
+ * y = 0.05 and never returns to y = 0, so no point of the tabletop is inside the
+ * cone at any roughness and at any camera pose. Move the pose and re-derive it.
+ *
+ * §2's brief always asked for "a *hard* cool rim"; the softbox was always the
+ * key's job. The 2.4 rim ratio retires with the area-light unit family, since a
+ * spot carries candela and a rect carries radiance — key : fill stays 1 : 0.24.
  */
-const RIM_POSITION = new Vector3(0.7, 1.2, -1.3);
-const RIM_AIM = new Vector3(0, 0.3, 0);
+const RIM_POSITION = new Vector3(0.15, 0.05, -1.45);
+const RIM_AIM = new Vector3(0, 0.33, 0);
 
-/** §2.1 as written, restored. */
-const RIM_INTENSITY = 22.0;
+/** Cone half-angle, radians. Must stay below the axis elevation above. */
+const RIM_ANGLE = 0.175;
+/** Softens inward from the cone edge only, so the flag above still holds. */
+const RIM_PENUMBRA = 0.5;
 
-/** §2.3's card, at R9's approved 32. Cards mirror the rig, so it travels with
- *  the light and was shortened with it. */
-const RIM_CARD_INTENSITY = 32;
+/**
+ * Candela, pre-`RIG_SCALE`. Calibrated from the ruled starting point of 25 to
+ * the delta acceptance: rim-on minus rim-off of at least +15 code on the right
+ * stile's outer face and +8 on the back panel's upper-right quadrant, with at
+ * most +0.5 on every slab third.
+ */
+const RIM_INTENSITY = 25.0;
 
 /* ------------------------------------------------------------------ *
  * Blue noise
@@ -302,12 +291,13 @@ export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   // relationship. The analytic fill keeps its specified 2.2 and its canonical
   // 0.24 ratio; this is the card that was double-counting it.
   scene.add(emissiveCard(2.5, 2.5, FILL_COLOR, 1.5, new Vector3(1.6, 0.9, 0.6)));
-  // 45 -> 32 (art-director revision): at 45 this card was the brightest thing
-  // in the environment and lit the tabletop's right third harder than the key lit
-  // its left, inverting the whole key/fill relationship. Cards mirror the rig, so
-  // it travels with the analytic rim — same position, same aim, and shortened
-  // from 1.8 m to 0.5 m with it.
-  scene.add(emissiveCard(0.3, 0.5, RIM_COLOR, RIM_CARD_INTENSITY, RIM_POSITION, RIM_AIM));
+  // §2.3's rim card is struck entirely (§10 R14). A PMREM cubemap cannot be
+  // flagged off a surface — it is a direction-only lookup with no notion of
+  // which object is asking — so the one thing the card could not do is stay off
+  // the slab, and measured it put +2.1 / +4.6 / +9.2 code values across the
+  // table thirds on its own. The surfaces it was meant to serve (rear-facing
+  // metal, the back sheet) are exactly what the analytic spot now lights, and
+  // nothing forward-facing was ever in its mirror path to begin with.
 
   // Behind the camera: the long warm streak in the tabletop sheen, and the only
   // thing in the studio that a *front-facing* surface can reflect at all.
@@ -345,7 +335,8 @@ export interface LightRig {
   group: Group;
   key: RectAreaLight;
   fill: RectAreaLight;
-  rim: RectAreaLight;
+  /** A spot, not a rect: see `RIM_POSITION` for why the species changed. */
+  rim: SpotLight;
   /** RectAreaLight cannot cast shadows, so a directional proxy runs the key axis. */
   shadow: DirectionalLight;
   /** Re-tint the key for the loss sequence. `kelvinDelta` negative is cooler. */
@@ -397,9 +388,17 @@ export function createLightRig(): LightRig {
   fill.position.set(1.6, 0.9, 0.6);
   fill.lookAt(TARGET);
 
-  const rim = new RectAreaLight(RIM_COLOR, RIM_INTENSITY * RIG_SCALE, 0.25, 0.4);
+  const rim = new SpotLight(RIM_COLOR, RIM_INTENSITY * RIG_SCALE);
   rim.position.copy(RIM_POSITION);
-  rim.lookAt(RIM_AIM);
+  rim.target.position.copy(RIM_AIM);
+  rim.angle = RIM_ANGLE;
+  rim.penumbra = RIM_PENUMBRA;
+  rim.decay = 2;
+  rim.distance = 0;
+  // No shadow map. The cone never meets the table and never leaves the back of
+  // the board, so there is no occlusion for one to resolve — and a second VSM
+  // pass costs a full re-rasterisation of the set for nothing.
+  rim.castShadow = false;
 
   const shadow = new DirectionalLight(KEY_COLOR, 1.6 * RIG_SCALE);
   shadow.position.copy(key.position);
@@ -422,7 +421,9 @@ export function createLightRig(): LightRig {
   cam.far = 3.0;
   cam.updateProjectionMatrix();
 
-  group.add(key, fill, rim, shadow, shadow.target);
+  // Both targets are in the graph so their world matrices are updated with it;
+  // a target outside the scene never gets one and the light aims at the origin.
+  group.add(key, fill, rim, rim.target, shadow, shadow.target);
 
   const keyBase = new Color(KEY_COLOR);
   const refWhite = kelvinRGB(5200, new Color());

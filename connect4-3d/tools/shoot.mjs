@@ -137,6 +137,26 @@ const SCENES = {
     await c4.setParallax(-1, -1);
   },
 
+  /**
+   * The bloom A/B pair. Item 9 is graded by differencing these against their
+   * normal counterparts: bloom may change specular cores and the win filament
+   * and nothing else, so a mid-grey backdrop or a disc body that moves between
+   * the two frames fails it outright. Same state, same seed, one pass disabled.
+   */
+  'midgame-nobloom': async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 3, 4, 2, 4, 4, 2, 5, 1, 2]);
+    await c4.settle();
+    await c4.setBypass(['bloom']);
+  },
+  'win-nobloom': async (c4) => {
+    await c4.reset({ difficulty: 'medium' });
+    await c4.playMoves([3, 0, 4, 1, 5, 0, 6]);
+    await c4.settle();
+    await c4.frames(48);
+    await c4.setBypass(['bloom']);
+  },
+
   /** Long after the win, once the celebration has settled into its resting state. */
   'win-settled': async (c4) => {
     await c4.reset({ difficulty: 'medium' });
