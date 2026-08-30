@@ -358,7 +358,12 @@ class CoachOverlayImpl implements CoachOverlay {
 
       // Hover promotes a line to class-A brightness: "what does playing here
       // touch" is the coach's single best teaching moment (bible §7.3).
-      const opacity = revealed || classA ? (item.openThree ? 0.6 : 0.45) : 0.14;
+      // A class-B line is normally a whisper, because in Full mode there are
+      // several. In Hints there is at most one — the player's own guaranteed
+      // line — and a whisper nobody notices is the bug this guarantee exists
+      // to fix, so it speaks up without reaching an urgent threat's brightness.
+      const quiet = this.mode === 'hints' ? 0.3 : 0.14;
+      const opacity = revealed || classA ? (item.openThree ? 0.6 : 0.45) : quiet;
       const flow = revealed || classA ? (item.openThree ? 0.8 : 0.4) : 0;
 
       this.placeFilament(item.threat, opacity, flow, filamentIndex++);
@@ -398,16 +403,33 @@ class CoachOverlayImpl implements CoachOverlay {
   private selectWithinBudget(items: Classified[], inspected: Coord | null): Classified[] {
     const out: Classified[] = [];
     let classB = 0;
+    /**
+     * Hints mode must never be all-opponent.
+     *
+     * Showing class A alone is correct on the urgency argument, but urgency is
+     * usually the opponent's: on most boards every three belongs to them, so a
+     * player turning on "Hints" watched the coach mark their opponent's threats
+     * and nothing of theirs, and reasonably concluded it was helping the wrong
+     * side. A hint the player cannot act on for themselves is not a hint.
+     *
+     * So Hints guarantees the mover one line of their own, even when it is only
+     * a two. It stays terse — this is the single best one — and Full still shows
+     * the wider picture.
+     */
+    const hintsNeedsMine = this.mode === 'hints';
+    let mineShown = false;
 
     for (const item of items) {
       if (out.length >= MAX_FILAMENTS) break;
       const classA = item.cls === 'A1' || item.cls === 'A2' || item.cls === 'A3';
+      const mine = item.threat.owner === this.toMove;
 
       if (classA) {
         out.push(item);
+        if (mine) mineShown = true;
         continue;
       }
-      if (this.mode === 'hints') continue; // Hints shows class A only.
+      if (this.mode === 'hints') continue;
       // A line the pointer is inspecting is worth showing whoever owns it.
       if (inspected && touches(item.threat, inspected)) {
         out.push(item);
@@ -418,6 +440,15 @@ class CoachOverlayImpl implements CoachOverlay {
       if (classB >= MAX_CLASS_B_FILAMENTS) continue;
       classB++;
       out.push(item);
+    }
+
+    // The guarantee has to survive the budget. Three opponent threes fill it
+    // exactly, and that is the position where a player most needs to be shown
+    // something of their own — so this one line is allowed past the cap rather
+    // than displacing a threat the player has to block.
+    if (hintsNeedsMine && !mineShown) {
+      const mine = items.find((i) => i.threat.owner === this.toMove && !out.includes(i));
+      if (mine) out.push(mine);
     }
     return out;
   }

@@ -110,6 +110,21 @@ const SCENES = {
     await c4.settle();
   },
 
+  /**
+   * Hints mode on a board where every three belongs to the opponent.
+   *
+   * This is the position that exposed a real fault: showing only the urgent
+   * class-A lines is defensible on urgency, but urgency is usually the
+   * opponent's, so a player who turned on Hints watched the coach mark their
+   * opponent's threats and nothing of their own. Ember to move with one live
+   * two; Petrol holding the only live three. Both must be lit.
+   */
+  hints: async (c4) => {
+    await c4.reset({ difficulty: 'easy', coach: 'hints' });
+    await c4.playMoves([0, 3, 0, 4, 6, 5]);
+    await c4.settle();
+  },
+
   /** The moment a win resolves — winning line lit, rest of board receding. */
   win: async (c4) => {
     await c4.reset({ difficulty: 'medium' });

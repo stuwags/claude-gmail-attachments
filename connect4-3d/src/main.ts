@@ -29,6 +29,8 @@ interface DebugHook {
   reset(opts?: {
     difficulty?: Difficulty;
     teaching?: boolean;
+    /** Explicit coach verbosity; overrides `teaching`. */
+    coach?: CoachMode;
     showMenu?: boolean;
     quality?: QualityTier;
   }): Promise<void>;
@@ -159,7 +161,7 @@ async function boot(): Promise<void> {
     async reset(opts = {}) {
       if (opts.quality) controller.setQuality(opts.quality);
       const difficulty = opts.difficulty ?? 'medium';
-      const coachMode: CoachMode = opts.teaching ? 'full' : 'off';
+      const coachMode: CoachMode = opts.coach ?? (opts.teaching ? 'full' : 'off');
       if (opts.showMenu) {
         controller.setDifficulty(difficulty);
         controller.setCoachMode(coachMode);
