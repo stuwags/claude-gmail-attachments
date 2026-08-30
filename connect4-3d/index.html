@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b0d10" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- iPadOS / iOS standalone behaviour -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Connect Four" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <!-- Explicit, so the browser does not fall back to requesting /favicon.ico
+         and logging a 404 on a page that ships perfectly good icons. -->
+    <link rel="icon" type="image/png" sizes="64x64" href="./icons/favicon-64.png" />
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+
+    <title>Connect Four — Grandmaster</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body>
+    <canvas id="stage" aria-label="Connect Four game board"></canvas>
+    <div id="ui-root"></div>
+
+    <noscript>
+      <div class="noscript">This game needs JavaScript and WebGL to run.</div>
+    </noscript>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

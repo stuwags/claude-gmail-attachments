@@ -1,0 +1,631 @@
+/**
+ * The Easy-mode coach (bible §7).
+ *
+ * The whole point is that a child can see, without being told, that three of
+ * someone's discs are lined up and where the fourth would go. The hard part is
+ * not finding the threats — `analyze()` does that — it is showing several of
+ * them at once without the board turning into a light show, because an overlay
+ * that marks everything teaches nothing.
+ *
+ * Three devices, two colours, and a hard budget do the work:
+ *   - a filament threads the discs that already exist, so a line reads as a line;
+ *   - a ghost disc sits where the fourth would land, so "where do I play" is
+ *     answered in the board's own vocabulary rather than an arrow;
+ *   - a ring on the front panel marks that landing cell from head-on.
+ * Urgency is encoded three ways at once — brightness, motion, and a doubled
+ * ring stroke — so it survives colour-blindness and a greyscale screenshot.
+ *
+ * Deviation from §7.4, deliberate and worth knowing. The bible specifies a
+ * dedicated overlay pass that depth-tests against the scene and dims to 0.45
+ * where it lies behind the panels. This draws the filaments and rings in front
+ * of the front panel instead, in the sorted transparent queue that §7.4
+ * sanctions for Tier B.
+ *
+ * The reason is the front sheet: it is solid acrylic with a hole per cell, so a
+ * filament threaded through the discs inside the board gets chopped into one
+ * stub per disc by the material between the holes. That reads as a smudge on
+ * each disc rather than as a line joining them — and joining them is the entire
+ * lesson. Ghost discs still sit inside their slot, because a ghost is standing
+ * in for a real disc and belongs where that disc would be.
+ */
+
+import {
+  AdditiveBlending,
+  BufferGeometry,
+  Color,
+  CylinderGeometry,
+  DoubleSide,
+  Group,
+  Mesh,
+  RingGeometry,
+  ShaderMaterial,
+  Vector3,
+} from 'three';
+import type { Coord, Player, Threat, ThreatReport } from '../../engine/types.ts';
+import { Player as P } from '../../engine/types.ts';
+import {
+  DISC_RADIUS,
+  DISC_THICKNESS,
+  PANEL_SANDWICH_DEPTH,
+  cellPosition,
+} from '../layout.ts';
+import type { CoachMode, CoachOverlay, EffectContext } from './types.ts';
+
+/* -------------------- palette (bible §0) -------------------- */
+
+const GLOW: Record<Player, Color> = {
+  [P.One]: new Color(0xff9666), // ember-glow
+  [P.Two]: new Color(0x53d7db), // petrol-glow
+};
+
+/* -------------------- classification (bible §7.1) -------------------- */
+
+type ThreatClass = 'A1' | 'A2' | 'A3' | 'B1' | 'B2';
+
+/** Lower is more urgent. Used to drop elements when over the noise budget. */
+const PRIORITY: Record<ThreatClass, number> = { A1: 1, A2: 2, A3: 3, B1: 4, B2: 5 };
+
+interface Classified {
+  threat: Threat;
+  cls: ThreatClass;
+  /** A three with two live completion cells: the loudest thing the coach shows. */
+  openThree: boolean;
+}
+
+function classify(threat: Threat, toMove: Player): ThreatClass | null {
+  const mine = threat.owner === toMove;
+  const live = threat.immediateGaps.length > 0;
+
+  if (threat.count === 3) {
+    if (!live) return 'A3';
+    return mine ? 'A1' : 'A2';
+  }
+  // A two with no playable growth cell teaches nothing yet; stay dark.
+  if (!live) return null;
+  return mine ? 'B1' : 'B2';
+}
+
+/* -------------------- budget (bible §7.3) -------------------- */
+
+const MAX_FILAMENTS = 3;
+const MAX_GHOSTS = 2;
+const MAX_CLASS_B_FILAMENTS = 2;
+const PULSE_PERIOD = 1.2;
+
+/* -------------------- shaders -------------------- */
+
+/**
+ * Additive fresnel. The rim-bright falloff is what keeps a ghost reading as a
+ * volume of light sitting in the slot rather than a flat sticker pasted on the
+ * board; a uniformly lit translucent disc looks like a UI element, not an object.
+ */
+const GHOST_VERTEX = /* glsl */ `
+  varying vec3 vNormalView;
+  varying vec3 vPositionView;
+  void main() {
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vNormalView = normalize(normalMatrix * normal);
+    vPositionView = mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const GHOST_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uPhase;
+  uniform float uShimmer;
+  varying vec3 vNormalView;
+  varying vec3 vPositionView;
+
+  // Cheap value noise; the shimmer only needs to break up flatness.
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+
+  void main() {
+    vec3 viewDir = normalize(-vPositionView);
+    float facing = abs(dot(normalize(vNormalView), viewDir));
+    // 0.10 at centre to 0.45 at the rim, power 2.5 (bible §3.4).
+    float fresnel = mix(0.10, 0.45, pow(1.0 - facing, 2.5));
+
+    float shimmer = 1.0 + (noise(vPositionView.xy * 90.0 + uTime * 0.33) - 0.5) * 0.16 * uShimmer;
+    float pulse = 0.22 + 0.18 * (0.5 + 0.5 * sin((uTime / 1.2 + uPhase) * 6.2831853));
+
+    gl_FragColor = vec4(uColor * fresnel * pulse * shimmer * uOpacity, 1.0);
+  }
+`;
+
+/**
+ * Filament. `uFlow` scrolls a luminance band along the tube's length so an
+ * urgent line reads as active at a glance; class B lines are static, which is
+ * the cheapest possible way to separate "watch this" from "look at this now".
+ */
+const FILAMENT_VERTEX = /* glsl */ `
+  varying vec2 vUv;
+  varying vec3 vNormalView;
+  varying vec3 vPositionView;
+  void main() {
+    vUv = uv;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vNormalView = normalize(normalMatrix * normal);
+    vPositionView = mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const FILAMENT_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uFlow;
+  varying vec2 vUv;
+  varying vec3 vNormalView;
+  varying vec3 vPositionView;
+
+  void main() {
+    vec3 viewDir = normalize(-vPositionView);
+    float facing = abs(dot(normalize(vNormalView), viewDir));
+    // Brighten the silhouette so a thin tube still reads at distance.
+    float rim = mix(0.55, 1.0, pow(1.0 - facing, 1.6));
+
+    float band = 1.0;
+    if (uFlow > 0.0) {
+      float t = fract(vUv.y - uTime * uFlow);
+      band = 0.72 + 0.55 * smoothstep(0.0, 0.22, t) * smoothstep(0.45, 0.23, t);
+    }
+    gl_FragColor = vec4(uColor * rim * band * uOpacity, 1.0);
+  }
+`;
+
+const RING_VERTEX = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const RING_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uPhase;
+  uniform float uPulse;
+  void main() {
+    float pulse = uPulse > 0.5
+      ? 0.62 + 0.38 * (0.5 + 0.5 * sin((uTime / 1.2 + uPhase) * 6.2831853))
+      : 1.0;
+    gl_FragColor = vec4(uColor * uOpacity * pulse, 1.0);
+  }
+`;
+
+/* -------------------- pooled objects -------------------- */
+
+interface PooledMesh {
+  mesh: Mesh;
+  material: ShaderMaterial;
+}
+
+/** The front face of the front acrylic panel, where landing rings sit. */
+const PANEL_FRONT_Z = PANEL_SANDWICH_DEPTH / 2;
+
+class CoachOverlayImpl implements CoachOverlay {
+  private readonly root = new Group();
+  private readonly ctx: EffectContext;
+
+  private filaments: PooledMesh[] = [];
+  private ghosts: PooledMesh[] = [];
+  private rings: PooledMesh[] = [];
+
+  private ghostGeometry: BufferGeometry;
+  private filamentGeometry: BufferGeometry;
+  private ringGeometryA: BufferGeometry;
+  private ringGeometryB: BufferGeometry;
+
+  private mode: CoachMode = 'off';
+  private report: ThreatReport | null = null;
+  private toMove: Player = P.One;
+  private inspected: number | null = null;
+  private inspectedRow: number | null = null;
+  private time = 0;
+  private lit = 0;
+  private dirty = true;
+
+  constructor(ctx: EffectContext) {
+    this.ctx = ctx;
+    this.root.name = 'coach-overlay';
+    // Inside the slot gap, so the acrylic attenuates it physically.
+    ctx.boardRoot.add(this.root);
+
+    // A slightly inset disc, so a ghost never z-fights the real disc geometry
+    // it may share a cell with during the frame a move lands.
+    this.ghostGeometry = new CylinderGeometry(
+      DISC_RADIUS * 0.94,
+      DISC_RADIUS * 0.94,
+      DISC_THICKNESS * 0.9,
+      48,
+      1,
+      false,
+    );
+    this.ghostGeometry.rotateX(Math.PI / 2);
+
+    // Unit-length tube; each filament scales it to span its line.
+    this.filamentGeometry = new CylinderGeometry(0.001, 0.001, 1, 12, 1, true);
+
+    this.ringGeometryA = new RingGeometry(0.019, 0.0215, 64);
+    this.ringGeometryB = new RingGeometry(0.02, 0.0208, 64);
+  }
+
+  /* -------------------- state -------------------- */
+
+  setReport(report: ThreatReport | null, _viewer: Player, toMove: Player): void {
+    this.report = report;
+    this.toMove = toMove;
+    this.dirty = true;
+  }
+
+  setMode(mode: CoachMode): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.dirty = true;
+  }
+
+  setInspectedColumn(col: number | null, landingRow?: number | null): void {
+    const row = landingRow ?? null;
+    if (this.inspected === col && this.inspectedRow === row) return;
+    this.inspected = col;
+    this.inspectedRow = row;
+    this.dirty = true;
+  }
+
+  update(dt: number): void {
+    // Frozen mid-pulse under reduced motion (bible §7.3), so the hierarchy
+    // still reads from brightness and stroke weight alone.
+    if (!this.ctx.reducedMotion) this.time += dt;
+    if (this.dirty) {
+      this.rebuild();
+      this.dirty = false;
+    }
+    for (const p of [...this.filaments, ...this.ghosts, ...this.rings]) {
+      if (p.mesh.visible) p.material.uniforms.uTime.value = this.time;
+    }
+  }
+
+  render(): void {
+    // Nothing to do: the overlay lives in the scene graph and is drawn by the
+    // main render, which is what lets the acrylic dim it for free.
+  }
+
+  litElementCount(): number {
+    return this.lit;
+  }
+
+  /* -------------------- assembly -------------------- */
+
+  private rebuild(): void {
+    this.hideAll();
+    this.lit = 0;
+
+    if (this.mode === 'off' || !this.report) {
+      this.root.visible = false;
+      return;
+    }
+    this.root.visible = true;
+
+    const classified: Classified[] = [];
+    for (const threat of this.report.threats) {
+      const cls = classify(threat, this.toMove);
+      if (!cls) continue;
+      classified.push({
+        threat,
+        cls,
+        openThree: threat.count === 3 && threat.immediateGaps.length >= 2,
+      });
+    }
+
+    // Sort most urgent first so the budget always keeps what matters.
+    classified.sort((a, b) => {
+      const p = PRIORITY[a.cls] - PRIORITY[b.cls];
+      if (p !== 0) return p;
+      if (a.openThree !== b.openThree) return a.openThree ? -1 : 1;
+      return b.threat.immediateGaps.length - a.threat.immediateGaps.length;
+    });
+
+    const inspectedCell = this.inspectedLandingCell();
+    const chosen = this.selectWithinBudget(classified, inspectedCell);
+
+    let filamentIndex = 0;
+    /**
+     * Ghosts are budgeted per THREAT, not per cell.
+     *
+     * An open three has two completion cells and is still one thing to see; if
+     * the cap counted cells it could render one half of an open three and drop
+     * the other, which teaches a child the exact opposite of the lesson — that
+     * there is one place to block, when there are two and blocking either loses.
+     * So a threat's gaps are admitted or refused together.
+     */
+    const ghostGroups: { cells: Coord[]; colour: Color }[] = [];
+
+    for (const item of chosen) {
+      const classA = item.cls === 'A1' || item.cls === 'A2' || item.cls === 'A3';
+      const revealed = inspectedCell !== null && touches(item.threat, inspectedCell);
+
+      // Hover promotes a line to class-A brightness: "what does playing here
+      // touch" is the coach's single best teaching moment (bible §7.3).
+      // A class-B line is normally a whisper, because in Full mode there are
+      // several. In Hints there is at most one — the player's own guaranteed
+      // line — and a whisper nobody notices is the bug this guarantee exists
+      // to fix, so it speaks up without reaching an urgent threat's brightness.
+      const quiet = this.mode === 'hints' ? 0.3 : 0.14;
+      const opacity = revealed || classA ? (item.openThree ? 0.6 : 0.45) : quiet;
+      const flow = revealed || classA ? (item.openThree ? 0.8 : 0.4) : 0;
+
+      this.placeFilament(item.threat, opacity, flow, filamentIndex++);
+      this.lit++;
+
+      if (item.cls === 'A1' || item.cls === 'A2') {
+        ghostGroups.push({
+          cells: item.threat.immediateGaps.map((g) => ({ col: g.col, row: g.row })),
+          colour: GLOW[item.threat.owner],
+        });
+      }
+    }
+
+    // `chosen` is already in priority order, so taking whole groups off the
+    // front keeps the most urgent threats and drops the least.
+    const drawn = new Set<string>();
+    let ghostUnits = 0;
+    for (const group of ghostGroups) {
+      if (ghostUnits >= MAX_GHOSTS) break;
+      for (const cell of group.cells) {
+        const key = `${cell.col},${cell.row}`;
+        // Two threats can complete in the same cell; draw it once.
+        if (drawn.has(key)) continue;
+        drawn.add(key);
+        this.placeGhost(cell.col, cell.row, group.colour, drawn.size);
+        this.placeRing(cell.col, cell.row, group.colour, true, drawn.size);
+        this.lit++;
+      }
+      ghostUnits++;
+    }
+  }
+
+  /**
+   * Apply the §7.3 noise budget: every class A line, then at most two class B
+   * lines belonging to the player to move, then the hover reveal on top.
+   */
+  private selectWithinBudget(items: Classified[], inspected: Coord | null): Classified[] {
+    const out: Classified[] = [];
+    let classB = 0;
+    /**
+     * Hints mode must never be all-opponent.
+     *
+     * Showing class A alone is correct on the urgency argument, but urgency is
+     * usually the opponent's: on most boards every three belongs to them, so a
+     * player turning on "Hints" watched the coach mark their opponent's threats
+     * and nothing of theirs, and reasonably concluded it was helping the wrong
+     * side. A hint the player cannot act on for themselves is not a hint.
+     *
+     * So Hints guarantees the mover one line of their own, even when it is only
+     * a two. It stays terse — this is the single best one — and Full still shows
+     * the wider picture.
+     */
+    const hintsNeedsMine = this.mode === 'hints';
+    let mineShown = false;
+
+    for (const item of items) {
+      if (out.length >= MAX_FILAMENTS) break;
+      const classA = item.cls === 'A1' || item.cls === 'A2' || item.cls === 'A3';
+      const mine = item.threat.owner === this.toMove;
+
+      if (classA) {
+        out.push(item);
+        if (mine) mineShown = true;
+        continue;
+      }
+      if (this.mode === 'hints') continue;
+      // A line the pointer is inspecting is worth showing whoever owns it.
+      if (inspected && touches(item.threat, inspected)) {
+        out.push(item);
+        continue;
+      }
+      // Otherwise class B is limited to the mover's own opportunities.
+      if (item.cls !== 'B1') continue;
+      if (classB >= MAX_CLASS_B_FILAMENTS) continue;
+      classB++;
+      out.push(item);
+    }
+
+    // The guarantee has to survive the budget. Three opponent threes fill it
+    // exactly, and that is the position where a player most needs to be shown
+    // something of their own — so this one line is allowed past the cap rather
+    // than displacing a threat the player has to block.
+    if (hintsNeedsMine && !mineShown) {
+      const mine = items.find((i) => i.threat.owner === this.toMove && !out.includes(i));
+      if (mine) out.push(mine);
+    }
+    return out;
+  }
+
+  /** Where a disc dropped in the inspected column would land. */
+  private inspectedLandingCell(): Coord | null {
+    if (this.inspected === null) return null;
+    if (this.inspectedRow !== null) return { col: this.inspected, row: this.inspectedRow };
+
+    // No row supplied: recover it from any reported gap in that column. This
+    // only covers columns that already carry a threat, which is why callers
+    // should pass the row.
+    if (!this.report) return null;
+    for (const t of this.report.threats) {
+      for (const gap of t.immediateGaps) {
+        if (gap.col === this.inspected) return gap;
+      }
+    }
+    return null;
+  }
+
+  /* -------------------- placement -------------------- */
+
+  private placeFilament(threat: Threat, opacity: number, flow: number, index: number): void {
+    const pooled = this.take(this.filaments, this.filamentGeometry, FILAMENT_VERTEX, FILAMENT_FRAGMENT, {
+      uFlow: { value: 0 },
+    });
+
+    const cells = threat.filled;
+    if (cells.length < 2) return;
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+
+    const a = new Vector3(...cellPosition(first.col, first.row));
+    const b = new Vector3(...cellPosition(last.col, last.row));
+
+    // Overlapping lines are separated in depth rather than blended into a
+    // muddy third colour (bible §7.3).
+    const zOffset = (index - (MAX_FILAMENTS - 1) / 2) * 0.003;
+    a.z += zOffset;
+    b.z += zOffset;
+
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const length = a.distanceTo(b);
+
+    // In front of the panel. Threaded through the discs inside the board, the
+    // solid acrylic between the holes chopped each filament into one stub per
+    // disc — which reads as a smudge on each disc rather than as a line joining
+    // them, and joining them is the entire lesson.
+    mid.z = PANEL_FRONT_Z + 0.0015;
+    a.z = mid.z;
+    b.z = mid.z;
+
+    pooled.mesh.position.copy(mid);
+    pooled.mesh.scale.set(1, length, 1);
+    // The cylinder's axis is +Y; aim it down the line.
+    pooled.mesh.quaternion.setFromUnitVectors(
+      new Vector3(0, 1, 0),
+      b.clone().sub(a).normalize(),
+    );
+    pooled.mesh.visible = true;
+
+    pooled.material.uniforms.uColor.value = GLOW[threat.owner];
+    pooled.material.uniforms.uOpacity.value = opacity;
+    pooled.material.uniforms.uFlow.value = this.ctx.reducedMotion ? 0 : flow;
+  }
+
+  private placeGhost(col: number, row: number, colour: Color, index: number): void {
+    const pooled = this.take(this.ghosts, this.ghostGeometry, GHOST_VERTEX, GHOST_FRAGMENT, {
+      uPhase: { value: 0 },
+      uShimmer: { value: 1 },
+    });
+    pooled.mesh.position.set(...cellPosition(col, row));
+    pooled.mesh.visible = true;
+    pooled.material.uniforms.uColor.value = colour;
+    pooled.material.uniforms.uOpacity.value = 1;
+    // Hashed phase, so several ghosts shimmer rather than throbbing in unison.
+    pooled.material.uniforms.uPhase.value = hashPhase(col, row);
+    pooled.material.uniforms.uShimmer.value = this.ctx.reducedMotion ? 0 : 1;
+    void index;
+  }
+
+  private placeRing(col: number, row: number, colour: Color, classA: boolean, index: number): void {
+    const pooled = this.take(
+      this.rings,
+      classA ? this.ringGeometryA : this.ringGeometryB,
+      RING_VERTEX,
+      RING_FRAGMENT,
+      { uPhase: { value: 0 }, uPulse: { value: 1 } },
+    );
+    pooled.mesh.geometry = classA ? this.ringGeometryA : this.ringGeometryB;
+    const [x, y] = cellPosition(col, row);
+    pooled.mesh.position.set(x, y, PANEL_FRONT_Z + 0.0002);
+    pooled.mesh.visible = true;
+    pooled.material.uniforms.uColor.value = colour;
+    pooled.material.uniforms.uOpacity.value = classA ? 0.5 : 0.18;
+    pooled.material.uniforms.uPhase.value = hashPhase(col, row);
+    pooled.material.uniforms.uPulse.value = classA && !this.ctx.reducedMotion ? 1 : 0;
+    void index;
+  }
+
+  /* -------------------- pooling -------------------- */
+
+  private take(
+    pool: PooledMesh[],
+    geometry: BufferGeometry,
+    vertexShader: string,
+    fragmentShader: string,
+    extraUniforms: Record<string, { value: unknown }>,
+  ): PooledMesh {
+    const free = pool.find((p) => !p.mesh.visible);
+    if (free) return free;
+
+    const material = new ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        uColor: { value: new Color(0xffffff) },
+        uOpacity: { value: 1 },
+        uTime: { value: 0 },
+        ...extraUniforms,
+      },
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      // Overlay elements are drawn over the board rather than depth-tested
+      // inside it; see placeFilament for why the acrylic made that necessary.
+      depthTest: false,
+      side: DoubleSide,
+      toneMapped: true,
+    });
+    const mesh = new Mesh(geometry, material);
+    mesh.visible = false;
+    // Draw after the opaque board so additive blending has something to add to.
+    mesh.renderOrder = 15;
+    this.root.add(mesh);
+    const pooled = { mesh, material };
+    pool.push(pooled);
+    return pooled;
+  }
+
+  private hideAll(): void {
+    for (const p of this.filaments) p.mesh.visible = false;
+    for (const p of this.ghosts) p.mesh.visible = false;
+    for (const p of this.rings) p.mesh.visible = false;
+  }
+
+  dispose(): void {
+    for (const p of [...this.filaments, ...this.ghosts, ...this.rings]) {
+      p.material.dispose();
+      this.root.remove(p.mesh);
+    }
+    this.filaments = [];
+    this.ghosts = [];
+    this.rings = [];
+    this.ghostGeometry.dispose();
+    this.filamentGeometry.dispose();
+    this.ringGeometryA.dispose();
+    this.ringGeometryB.dispose();
+    this.root.removeFromParent();
+  }
+}
+
+/* -------------------- helpers -------------------- */
+
+function touches(threat: Threat, cell: Coord): boolean {
+  return threat.window.some((c) => c.col === cell.col && c.row === cell.row);
+}
+
+/** Stable per-cell phase offset in 0..1. */
+function hashPhase(col: number, row: number): number {
+  const h = Math.sin(col * 127.1 + row * 311.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+
+export function createCoachOverlay(ctx: EffectContext): CoachOverlay {
+  return new CoachOverlayImpl(ctx);
+}
+
+export { PULSE_PERIOD };

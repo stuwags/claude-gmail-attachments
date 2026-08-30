@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="ground" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#101114"/>
+      <stop offset="100%" stop-color="#1D2024"/>
+    </linearGradient>
+    <radialGradient id="pool" cx="50%" cy="46%" r="58%">
+      <stop offset="0%" stop-color="#2A2521" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#2A2521" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.34)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0.04)"/>
+    </linearGradient>
+    
+      <linearGradient id="body0" x1="0.18" y1="0" x2="0.82" y2="1">
+        <stop offset="0%" stop-color="rgb(216,121,87)"/>
+        <stop offset="52%" stop-color="#CE5A32"/>
+        <stop offset="100%" stop-color="rgb(155,69,40)"/>
+      </linearGradient>
+      <linearGradient id="body1" x1="0.18" y1="0" x2="0.82" y2="1">
+        <stop offset="0%" stop-color="rgb(63,126,130)"/>
+        <stop offset="52%" stop-color="#0F6068"/>
+        <stop offset="100%" stop-color="rgb(13,73,80)"/>
+      </linearGradient>
+      <linearGradient id="body2" x1="0.18" y1="0" x2="0.82" y2="1">
+        <stop offset="0%" stop-color="rgb(63,126,130)"/>
+        <stop offset="52%" stop-color="#0F6068"/>
+        <stop offset="100%" stop-color="rgb(13,73,80)"/>
+      </linearGradient>
+      <linearGradient id="body3" x1="0.18" y1="0" x2="0.82" y2="1">
+        <stop offset="0%" stop-color="rgb(216,121,87)"/>
+        <stop offset="52%" stop-color="#CE5A32"/>
+        <stop offset="100%" stop-color="rgb(155,69,40)"/>
+      </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112.64" fill="url(#ground)"/>
+  <rect width="512" height="512" rx="112.64" fill="url(#pool)"/>
+  
+    <g>
+      <circle cx="170.79808000000003" cy="170.79808000000003" r="73.31327999999999" fill="url(#body0)"/>
+      <circle cx="170.79808000000003" cy="170.79808000000003" r="70.0141824" fill="none"
+              stroke="rgb(137,62,36)" stroke-width="6.598195199999999" opacity="0.55"/>
+      <!-- Softbox highlight: rectangular, matching the key light in the game. -->
+      <rect x="126.81011200000003" y="125.34384640000003"
+            width="30.791577599999997" height="48.386764799999995"
+            rx="5.865062399999999" fill="url(#gloss)" transform="rotate(-16 170.79808000000003 170.79808000000003)"/>
+      <path d="M 99.59 164.57 A 71.48 71.48 0 0 1 216.74 116.04" fill="none"
+            stroke="rgba(255,248,240,0.34)" stroke-width="4.0322303999999995" stroke-linecap="round"/>
+      <path d="M 237.97 195.25 A 71.48 71.48 0 0 1 124.85 225.56" fill="none"
+            stroke="rgba(0,0,0,0.4)" stroke-width="4.3987967999999995" stroke-linecap="round"/>
+    </g>
+    <g>
+      <circle cx="341.20192" cy="170.79808000000003" r="73.31327999999999" fill="url(#body1)"/>
+      <circle cx="341.20192" cy="170.79808000000003" r="70.0141824" fill="none"
+              stroke="rgb(13,66,71)" stroke-width="6.598195199999999" opacity="0.55"/>
+      <!-- Softbox highlight: rectangular, matching the key light in the game. -->
+      <rect x="297.21395199999995" y="125.34384640000003"
+            width="30.791577599999997" height="48.386764799999995"
+            rx="5.865062399999999" fill="url(#gloss)" transform="rotate(-16 341.20192 170.79808000000003)"/>
+      <path d="M 269.99 164.57 A 71.48 71.48 0 0 1 387.15 116.04" fill="none"
+            stroke="rgba(255,248,240,0.34)" stroke-width="4.0322303999999995" stroke-linecap="round"/>
+      <path d="M 408.37 195.25 A 71.48 71.48 0 0 1 295.26 225.56" fill="none"
+            stroke="rgba(0,0,0,0.4)" stroke-width="4.3987967999999995" stroke-linecap="round"/>
+    </g>
+    <g>
+      <circle cx="170.79808000000003" cy="341.20192" r="73.31327999999999" fill="url(#body2)"/>
+      <circle cx="170.79808000000003" cy="341.20192" r="70.0141824" fill="none"
+              stroke="rgb(13,66,71)" stroke-width="6.598195199999999" opacity="0.55"/>
+      <!-- Softbox highlight: rectangular, matching the key light in the game. -->
+      <rect x="126.81011200000003" y="295.74768639999996"
+            width="30.791577599999997" height="48.386764799999995"
+            rx="5.865062399999999" fill="url(#gloss)" transform="rotate(-16 170.79808000000003 341.20192)"/>
+      <path d="M 99.59 334.97 A 71.48 71.48 0 0 1 216.74 286.44" fill="none"
+            stroke="rgba(255,248,240,0.34)" stroke-width="4.0322303999999995" stroke-linecap="round"/>
+      <path d="M 237.97 365.65 A 71.48 71.48 0 0 1 124.85 395.96" fill="none"
+            stroke="rgba(0,0,0,0.4)" stroke-width="4.3987967999999995" stroke-linecap="round"/>
+    </g>
+    <g>
+      <circle cx="341.20192" cy="341.20192" r="73.31327999999999" fill="url(#body3)"/>
+      <circle cx="341.20192" cy="341.20192" r="70.0141824" fill="none"
+              stroke="rgb(137,62,36)" stroke-width="6.598195199999999" opacity="0.55"/>
+      <!-- Softbox highlight: rectangular, matching the key light in the game. -->
+      <rect x="297.21395199999995" y="295.74768639999996"
+            width="30.791577599999997" height="48.386764799999995"
+            rx="5.865062399999999" fill="url(#gloss)" transform="rotate(-16 341.20192 341.20192)"/>
+      <path d="M 269.99 334.97 A 71.48 71.48 0 0 1 387.15 286.44" fill="none"
+            stroke="rgba(255,248,240,0.34)" stroke-width="4.0322303999999995" stroke-linecap="round"/>
+      <path d="M 408.37 365.65 A 71.48 71.48 0 0 1 295.26 395.96" fill="none"
+            stroke="rgba(0,0,0,0.4)" stroke-width="4.3987967999999995" stroke-linecap="round"/>
+    </g>
+</svg>
