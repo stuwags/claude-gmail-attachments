@@ -92,7 +92,20 @@ export interface ThreatReport {
   trapMoves: number[];
 }
 
-export type Difficulty = 'easy' | 'medium' | 'hard';
+/**
+ * The difficulty ladder, weakest first. Order is meaningful: tests assert that
+ * each rung beats the one below it over seeded self-play, so a change that
+ * accidentally makes a level weaker than its neighbour fails rather than ships.
+ *
+ * Five rungs rather than three because three left a cliff. The old `easy`
+ * looked one ply ahead and covered a threat only 60% of the time; the old
+ * `medium` searched seven plies and never missed a block or walked into a
+ * one-move trap. There was nothing in between, so a player who found the first
+ * trivial could not win a single game of the second.
+ */
+export const DIFFICULTIES = ['easy', 'steady', 'medium', 'hard', 'grandmaster'] as const;
+
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 /** What the AI decided, and enough context to explain it in Easy mode. */
 export interface AiDecision {

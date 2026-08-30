@@ -20,6 +20,7 @@ import type { CoachMode } from '../render/effects/types.ts';
 import type { GamePhase, GameSnapshot, Hud, MatchConfig } from '../ui/types.ts';
 import { AiClient } from './ai-client.ts';
 import { AudioEngine } from './audio.ts';
+import { DEFAULT_COACH_FOR } from './coach-defaults.ts';
 
 /** Display names, from the art direction. */
 export const PLAYER_NAMES: Record<Player, string> = {
@@ -27,13 +28,22 @@ export const PLAYER_NAMES: Record<Player, string> = {
   [Player.Two]: 'Petrol',
 };
 
-/** Per-difficulty search budget and how long the computer pretends to think. */
+/**
+ * Per-difficulty search budget and how long the computer pretends to think.
+ *
+ * The hold climbs with the ladder, because how long an opponent appears to
+ * consider a move is part of how strong it feels. A beginner-strength reply
+ * that lands instantly reads as dismissive; a grandmaster's arriving just as
+ * fast would give away that it never had to work for it.
+ */
 const AI_TIMING: Record<Difficulty, { budgetMs: number; minThinkMs: number; maxThinkMs: number }> = {
   // Easy answers quickly — a child waiting on a beginner-strength opponent is
-  // just dead air — but not instantly, which reads as dismissive.
+  // just dead air — but not instantly.
   easy: { budgetMs: 60, minThinkMs: 420, maxThinkMs: 700 },
-  medium: { budgetMs: 220, minThinkMs: 520, maxThinkMs: 950 },
-  hard: { budgetMs: 900, minThinkMs: 600, maxThinkMs: 1500 },
+  steady: { budgetMs: 90, minThinkMs: 470, maxThinkMs: 800 },
+  medium: { budgetMs: 250, minThinkMs: 540, maxThinkMs: 950 },
+  hard: { budgetMs: 550, minThinkMs: 620, maxThinkMs: 1200 },
+  grandmaster: { budgetMs: 900, minThinkMs: 700, maxThinkMs: 1600 },
 };
 
 export interface ControllerDeps {
@@ -326,9 +336,10 @@ export class GameController {
 
   setDifficulty(difficulty: Difficulty): void {
     this.config.difficulty = difficulty;
-    // Easy mode exists to teach; turning the coach on with it is the point.
-    if (difficulty === 'easy' && this.config.coachMode === 'off') {
-      this.config.coachMode = 'full';
+    // Only when the coach is off: a player who has chosen a level keeps it.
+    if (this.config.coachMode === 'off' && DEFAULT_COACH_FOR[difficulty] !== 'off') {
+      this.config.coachMode = DEFAULT_COACH_FOR[difficulty];
+      this.deps.view.setCoachMode(this.config.coachMode);
       this.refreshCoach();
     }
     this.publish();

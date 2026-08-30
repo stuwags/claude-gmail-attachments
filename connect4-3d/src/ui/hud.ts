@@ -19,6 +19,7 @@
 import { COLS, Player } from '../engine/types';
 import type { Difficulty } from '../engine/types';
 import type { CoachMode } from '../render/effects/types';
+import { DEFAULT_COACH_FOR as COACH_FOR } from '../game/coach-defaults.ts';
 import type { QualityTier } from '../render/api';
 import { COLUMN_DROP_EVENT, COLUMN_SELECT_EVENT } from './events';
 import { el, icon, setAttr, setHidden, setText } from './dom';
@@ -33,9 +34,6 @@ const tintOf = (p: Player): 'ember' | 'petrol' => (p === Player.One ? 'ember' : 
 const glowOf = (p: Player): string =>
   p === Player.One ? 'var(--c4-ember-glow)' : 'var(--c4-petrol-glow)';
 
-/** Coach default per difficulty. §7.3: "Easy mode defaults to Full." */
-const COACH_FOR: Record<Difficulty, CoachMode> = { easy: 'full', medium: 'hints', hard: 'off' };
-
 const COACH_NOTE: Record<CoachMode, string> = {
   off: 'No marks on the board.',
   hints: "Marks this turn's live threats.",
@@ -46,10 +44,18 @@ const COACH_LEVEL: Record<CoachMode, number> = { off: 0, hints: 1, full: 2 };
 const COACH_LABEL: Record<CoachMode, string> = { off: 'Off', hints: 'Hints', full: 'Full' };
 const COACH_CYCLE: Record<CoachMode, CoachMode> = { off: 'hints', hints: 'full', full: 'off' };
 
+/**
+ * Five rungs, weakest first. Each description says what the opponent actually
+ * does rather than how hard it feels, because "medium" means nothing until you
+ * have lost to it — and the gap that made this list five long was a player
+ * finding Easy trivial and never once beating the old Medium.
+ */
 const DIFFICULTIES: readonly SegItem<Difficulty>[] = [
-  { value: 'easy', label: 'Easy', desc: 'Coach on. Teaches a child to spot threats.' },
-  { value: 'medium', label: 'Medium', desc: 'Steady. It punishes slips.' },
-  { value: 'hard', label: 'Hard', desc: 'Deep search. Misses nothing.' },
+  { value: 'easy', label: 'Easy', desc: 'For a first game. Misses blocks, so you can win.' },
+  { value: 'steady', label: 'Steady', desc: 'Blocks you, but only looks a move or two ahead.' },
+  { value: 'medium', label: 'Medium', desc: 'Never misses a block. Can still be out-planned.' },
+  { value: 'hard', label: 'Hard', desc: 'Sees several moves ahead and sets traps.' },
+  { value: 'grandmaster', label: 'Grandmaster', desc: 'Searches to the end. It will not slip.' },
 ];
 
 const COACH_MODES: readonly SegItem<CoachMode>[] = [

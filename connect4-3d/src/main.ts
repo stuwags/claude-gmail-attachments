@@ -11,6 +11,7 @@ import { createHud } from './ui/hud.ts';
 import { AudioEngine } from './game/audio.ts';
 import { AiClient } from './game/ai-client.ts';
 import { GameController } from './game/controller.ts';
+import { DEFAULT_COACH_FOR } from './game/coach-defaults.ts';
 import { InputController } from './game/input.ts';
 import { Player } from './engine/types.ts';
 import {
@@ -185,7 +186,7 @@ async function boot(): Promise<void> {
         difficulty,
         vsAi: true,
         humanPlayer: Player.One,
-        coachMode: difficulty === 'easy' ? 'full' : 'off',
+        coachMode: DEFAULT_COACH_FOR[difficulty],
       });
       view.snapAnimations();
       await view.waitFrames(1);

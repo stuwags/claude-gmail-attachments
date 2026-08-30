@@ -532,7 +532,17 @@ function searchRoot(
 /* difficulty tiers                                                           */
 /* -------------------------------------------------------------------------- */
 
-const DEFAULT_BUDGET: Record<Difficulty, number> = { easy: 30, medium: 250, hard: 900 };
+// INTERIM: `steady` and `grandmaster` are new rungs whose own tuning is not
+// written yet, so they borrow their neighbours' budgets and choosers below.
+// This keeps the build honest while the five-rung ladder lands; it is not the
+// intended behaviour, and the ladder's self-play test will fail until it is.
+const DEFAULT_BUDGET: Record<Difficulty, number> = {
+  easy: 30,
+  steady: 90,
+  medium: 250,
+  hard: 550,
+  grandmaster: 900,
+};
 /** Depth cap for medium: a solid club player, blind to deep forcing lines. */
 const MEDIUM_MAX_DEPTH = 7;
 /** Root moves this close to the best are all fair game for medium's noise. */
@@ -721,10 +731,12 @@ export function chooseMove(board: Board, opts: SearchOptions): AiDecision {
       case 'easy':
         decision = chooseEasy(board, rng);
         break;
+      case 'steady':
       case 'medium':
         decision = chooseMedium(board, budget, rng);
         break;
       case 'hard':
+      case 'grandmaster':
         decision = chooseHard(board, budget);
         break;
       default:
