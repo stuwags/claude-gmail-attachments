@@ -14,19 +14,32 @@ that rendered frames are graded against.
 
 ## Running it
 
+Needs Node 20.19+ (or 22.12+). Check with `node -v`; on a Mac, `brew install node`.
+
 ```bash
-npm install
-npm run dev          # http://localhost:5173
+git clone https://github.com/stuwags/claude-gmail-attachments
+cd claude-gmail-attachments/connect4-3d
+
+# The skip flag avoids downloading ~150 MB of Chromium you don't need —
+# Playwright is here only for the screenshot and smoke-test tooling.
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install
+
+npm run dev          # then open http://localhost:5173
 ```
+
+Other scripts:
 
 ```bash
 npm run build        # typecheck, then bundle to dist/
 npm run preview      # serve the production build
-npm test             # rules engine and search tests
+npm test             # rules engine, threat analysis, search, drop physics
+npm run shots        # render reference frames (needs the browser download above)
+npm run smoke        # play the game headlessly and assert it works
 ```
 
-Requires Node 22+. The game needs WebGL 2, which means Safari 15+, or any
-current Chrome, Edge or Firefox.
+The game needs WebGL 2 — Safari 15+, or any current Chrome, Edge or Firefox.
+It runs far better on real hardware than in a headless container: everything in
+`shots/` was rendered on a software rasteriser with no GPU.
 
 ## Playing
 
