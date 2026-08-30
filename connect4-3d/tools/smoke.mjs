@@ -80,6 +80,42 @@ async function main() {
     console.log('\nboot');
     check('page becomes ready', true);
 
+    /* ---------------- the title screen actually starts a game ---------------- */
+
+    // This path had no coverage until a manual playthrough exercised it. The
+    // controller can be driven directly from the debug hook, which is what the
+    // rest of this file does — so a broken Start button would have gone
+    // unnoticed while every functional check still passed.
+    console.log('\ntitle screen');
+    await page.evaluate(() => window.__c4.reset({ showMenu: true }));
+    await page.evaluate(() => window.__c4.frames(2));
+
+    const menuState = await page.evaluate(() => window.__c4.state());
+    check('the game opens on the title screen', menuState.phase === 'menu', `phase=${menuState.phase}`);
+
+    const clickByText = (needle) =>
+      page.evaluate((n) => {
+        const b = [...document.querySelectorAll('button')].find((x) =>
+          (x.textContent || '').toLowerCase().includes(n),
+        );
+        if (!b) return false;
+        b.click();
+        return true;
+      }, needle);
+
+    check('the difficulty control is reachable', await clickByText('easy'));
+    await page.evaluate(() => window.__c4.frames(2));
+    check('the start button is reachable', await clickByText('start'));
+    await page.waitForFunction(() => window.__c4.state().phase !== 'menu', null, { timeout: 120_000 });
+
+    const started = await page.evaluate(() => window.__c4.state());
+    check('starting from the menu begins a game', started.phase === 'playing', `phase=${started.phase}`);
+    check('the board starts empty', started.moveCount === 0, `moveCount=${started.moveCount}`);
+    check(
+      'choosing Easy turns the coach on',
+      (await page.evaluate(() => window.__c4.state())).urgentColumns !== undefined,
+    );
+
     /* ---------------- a human move lands ---------------- */
 
     console.log('\nhuman move against the computer');
