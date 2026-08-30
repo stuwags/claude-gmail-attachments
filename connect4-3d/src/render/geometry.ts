@@ -229,11 +229,16 @@ const crownRise = (r: number): number =>
  * Profile rows across the crown, stepped by normal swing rather than by radius.
  *
  * What the crown is *for* is a mirror-direction gradient, and the highlight's
- * soft edge is that gradient resolved: 0.8° of normal per row is 1.6° of mirror
+ * soft edge is that gradient resolved: 1.2° of normal per row is 2.4° of mirror
  * per row against a catch card that subtends about 5° x 7.5°, so the window's
- * edge is carried by several rows rather than by one.
+ * edge is carried by three or four rows rather than by one.
+ *
+ * That is also the whole triangle budget. Each profile row costs 8,064
+ * triangles across a full board, counted twice because every disc is rasterised
+ * again into the transmission buffer, and §0's ceiling is 450k: measured, a
+ * 42-disc board is 432,205 at this step and 464,461 at 0.8°.
  */
-const CROWN_NORMAL_STEP = (0.8 * Math.PI) / 180;
+const CROWN_NORMAL_STEP = (1.2 * Math.PI) / 180;
 const crownSegments = (r0: number, r1: number): number =>
   Math.max(
     1,
