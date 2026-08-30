@@ -43,7 +43,7 @@ import {
 
 export interface SearchOptions {
   difficulty: Difficulty;
-  /** Wall-clock budget for the search. Defaults per difficulty (hard: 900ms). */
+  /** Wall-clock budget for the search. Defaults per difficulty (grandmaster: 900ms). */
   timeBudgetMs?: number;
   /** Source of randomness. Defaults to `Math.random`; seed it to reproduce games. */
   rng?: () => number;
@@ -529,30 +529,132 @@ function searchRoot(
 }
 
 /* -------------------------------------------------------------------------- */
-/* difficulty tiers                                                           */
+/* the difficulty ladder                                                      */
 /* -------------------------------------------------------------------------- */
 
-// INTERIM: `steady` and `grandmaster` are new rungs whose own tuning is not
-// written yet, so they borrow their neighbours' budgets and choosers below.
-// This keeps the build honest while the five-rung ladder lands; it is not the
-// intended behaviour, and the ladder's self-play test will fail until it is.
+/**
+ * One rung's tuning. Every rung runs the same chooser, {@link choose}; only
+ * these numbers differ. That is deliberate: when the rungs were separate
+ * functions they drifted apart along axes nobody had chosen, and the ladder
+ * ended up with a cliff in the middle of it.
+ */
+interface Tier {
+  /**
+   * Plies of search. 0 means no search at all: each drop is judged by a single
+   * static evaluation of the position it leaves behind, which sees threats
+   * already on the board but nothing the opponent might do about them.
+   */
+  plies: number;
+  /**
+   * How often an immediate threat actually gets covered. Below 1 the rung
+   * sometimes looks somewhere else entirely — the single most visible
+   * difference between a beginner and an opponent worth beating. At 1 no
+   * special case is needed: a move that leaves a four standing comes back from
+   * the search a whole mate score adrift, and `noise` is measured in
+   * evaluation points, not in mate scores.
+   */
+  blockRate: number;
+  /**
+   * Width, in evaluation points, of the band inside which the rung will
+   * cheerfully play the wrong move. A uniform draw from `[0, noise)` is added
+   * to every root score before the best is taken, so a move `d` points worse
+   * than the best can be chosen exactly when `d < noise`, and only rarely as
+   * `d` approaches it. 0 makes the rung deterministic.
+   *
+   * For scale: one disc's difference in the centre column is 36 points and a
+   * playable three-in-a-row is about 86, so `noise` of 62 trades away roughly
+   * "one good square", while 4 only breaks near-ties.
+   */
+  noise: number;
+  /**
+   * Multiplier on the centre-out ordering bonus, added to every root score.
+   * Keeps a rung's mistakes looking human — a weak player crowds the middle,
+   * it does not scatter discs at random.
+   */
+  centrePull: number;
+  /**
+   * Discard root moves that hand the opponent a win on top of them. A search
+   * of one ply or more already scores those as losses, so this is a guard, not
+   * a strategy; what it really marks is which rungs are *entitled* to be safe.
+   */
+  trapFilter: boolean;
+  /** Answer the empty board with the centre instead of spending the clock on it. */
+  openingBook: boolean;
+}
+
+/**
+ * The five rungs, weakest first. The numbers encode a design intent that is
+ * invisible from the code, so each is spelled out:
+ *
+ *   easy         A young child. One static look per drop and no search at all,
+ *                so it cannot see a reply coming; it misses two immediate
+ *                blocks in five. Wide noise keeps it from ever looking robotic.
+ *                Deliberately not strengthened — this rung is somebody's first
+ *                game of Connect Four.
+ *
+ *   steady       The rung that was missing. Covers nine threats in ten and
+ *                takes every win, but two plies is one move and a reply: it
+ *                cannot see a trap being built, only one being sprung. Should
+ *                lose to a thoughtful adult reasonably often while punishing
+ *                genuine carelessness. No trap filter, because walking into a
+ *                two-move trap is exactly the mistake at this level.
+ *
+ *   medium       A club player who is beatable. Five plies is enough to set a
+ *                double threat up and to see most of them coming, but not to
+ *                navigate the parity endgame. Noise stays wide enough that a
+ *                patient opponent gets openings. Still no trap filter: at this
+ *                level the search is what keeps it safe, and when the search
+ *                is wrong the rung deserves to be wrong with it.
+ *
+ *   hard         Strong. Eight plies of exact-window search sees the standard
+ *                forcing patterns; the noise only breaks near-ties, so it is
+ *                beaten by better play rather than by waiting for a slip. The
+ *                depth cap is the whole difference from the rung above.
+ *
+ *   grandmaster  Uncapped inside the budget, deterministic, opens on the
+ *                centre. Nothing here is handicapped; if you beat it, you
+ *                out-played a search that read the position to the end of its
+ *                clock.
+ *
+ * The steps are real and measured, not asserted. Seeded self-play from paired
+ * random openings, each rung against the one below it, gives the stronger rung
+ * roughly 92 / 73 / 75 / 88 percent — see the ladder tests, which fail if any
+ * step flattens out. Retune from those numbers, not from taste alone: the
+ * axes trade against each other, and buying a wider gap at one rung usually
+ * spends one at the next.
+ */
+const TIERS: Record<Difficulty, Tier> = {
+  easy: {
+    plies: 0, blockRate: 0.6, noise: 78, centrePull: 0.3, trapFilter: false, openingBook: false,
+  },
+  steady: {
+    plies: 2, blockRate: 0.9, noise: 62, centrePull: 0.16, trapFilter: false, openingBook: false,
+  },
+  medium: {
+    plies: 5, blockRate: 1, noise: 40, centrePull: 0.06, trapFilter: false, openingBook: false,
+  },
+  hard: {
+    plies: 8, blockRate: 1, noise: 4, centrePull: 0, trapFilter: true, openingBook: false,
+  },
+  grandmaster: {
+    plies: CELLS, blockRate: 1, noise: 0, centrePull: 0, trapFilter: true, openingBook: true,
+  },
+};
+
+/**
+ * Default wall-clock budget per rung; `SearchOptions.timeBudgetMs` overrides
+ * it. Separate from {@link TIERS} because it is the one tuning number a caller
+ * is allowed to argue with — the UI shortens it so the computer answers at a
+ * conversational pace. Depth-capped rungs finish well inside these, so the
+ * budget only really bites on `grandmaster` and on a crowded midgame.
+ */
 const DEFAULT_BUDGET: Record<Difficulty, number> = {
   easy: 30,
-  steady: 90,
-  medium: 250,
-  hard: 550,
+  steady: 40,
+  medium: 150,
+  hard: 450,
   grandmaster: 900,
 };
-/** Depth cap for medium: a solid club player, blind to deep forcing lines. */
-const MEDIUM_MAX_DEPTH = 7;
-/** Root moves this close to the best are all fair game for medium's noise. */
-const MEDIUM_NOISE_WINDOW = 25;
-/** How often easy actually covers an immediate threat. */
-const EASY_BLOCK_RATE = 0.6;
-/** Spread of easy's random tie-breaking, in evaluation points. */
-const EASY_NOISE = 78;
-/** Easy's mild preference for the middle of the board. */
-const EASY_CENTRE: readonly number[] = [0, 6, 12, 18, 12, 6, 0];
 
 function decide(
   column: number,
@@ -582,91 +684,50 @@ function losesAtOnce(board: Board, col: number): boolean {
   return reply !== 0;
 }
 
-function weightedPick(cands: readonly number[], scores: readonly number[], rng: () => number): number {
-  let worst = Infinity;
-  for (const c of cands) worst = Math.min(worst, scores[c]);
-  const weights: number[] = [];
-  let total = 0;
-  for (const c of cands) {
-    const w = 1 + (scores[c] - worst) + ORDER_BONUS[c] / 10;
-    weights.push(w);
-    total += w;
+/**
+ * Root scores with no search behind them: one static evaluation per drop. This
+ * is the whole of `easy`'s thinking, and it is genuinely blind — the position
+ * it scores is the one *before* the opponent gets to answer.
+ */
+function scanOnePly(board: Board, pool: readonly number[]): RootResult {
+  const scores: number[] = new Array<number>(COLS).fill(-INF);
+  let move = pool[0];
+  let best = -INF;
+  for (const c of pool) {
+    board.play(c);
+    const v = -evaluate(board);
+    board.undo();
+    scores[c] = v;
+    if (v > best) {
+      best = v;
+      move = c;
+    }
   }
-  let r = rng() * total;
-  for (let i = 0; i < cands.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return cands[i];
-  }
-  return cands[cands.length - 1];
+  // Reported as depth 1: it really did look one move ahead, just not two.
+  return { move, score: best, depth: 1, nodes: pool.length, pv: [move], scores };
+}
+
+/** Highest scoring column in `cands`; ties go to the earliest, which is leftmost. */
+function bestScoring(cands: readonly number[], scores: readonly number[]): number {
+  let best = cands[0];
+  for (const c of cands) if (scores[c] > scores[best]) best = c;
+  return best;
 }
 
 /**
- * As strong as fits in the budget. Deterministic: the root move order is
- * centre-out and only a strictly better score replaces the current best, so
- * provably equal moves always resolve to the more central column.
+ * The one chooser every rung runs. What separates the rungs is entirely in
+ * `tier` and `budgetMs`; the shape of the decision — win, block, look, pick —
+ * is the same all the way up.
  */
-function chooseHard(board: Board, budgetMs: number): AiDecision {
-  const t0 = nowMs();
-
-  // Opening book, all one move of it: as first player, take the centre.
-  if (board.moveCount === 0) return decide(3, 0, 0, 0, nowMs() - t0, [3]);
-
-  const win = board.winningMoveMask(board.toMove);
-  if (win !== 0) {
-    const c = centreMost(win);
-    return decide(c, MATE - 1, 1, 1, nowMs() - t0, [c], 'win');
-  }
-
-  const res = searchRoot(board, CELLS, budgetMs, false);
-  const proven = provenOf(res.score, res.depth, CELLS - board.moveCount);
-  return decide(res.move, res.score, res.depth, res.nodes, nowMs() - t0, res.pv, proven);
-}
-
-/** Solid club player: sees a handful of plies, never blunders a one-mover. */
-function chooseMedium(board: Board, budgetMs: number, rng: () => number): AiDecision {
+function choose(board: Board, tier: Tier, budgetMs: number, rng: () => number): AiDecision {
   const t0 = nowMs();
   const me = board.toMove;
 
-  const win = board.winningMoveMask(me);
-  if (win !== 0) {
-    const c = centreMost(win);
-    return decide(c, MATE - 1, 1, 1, nowMs() - t0, [c], 'win');
-  }
-  const block = board.winningMoveMask(other(me));
-  if (block !== 0) {
-    // Cover the threat. With two of them the game is lost anyway; cover the
-    // more central one so the position at least stays sane.
-    const c = centreMost(block);
-    return decide(c, 0, 1, 1, nowMs() - t0, [c]);
-  }
+  if (tier.openingBook && board.moveCount === 0) return decide(3, 0, 0, 0, nowMs() - t0, [3]);
 
-  const res = searchRoot(board, MEDIUM_MAX_DEPTH, budgetMs, true);
-
-  let cands = board.legalMoves().filter((c) => {
-    const s = res.scores[c];
-    return s > -MATE_THRESHOLD && s >= res.score - MEDIUM_NOISE_WINDOW;
-  });
-  if (cands.length === 0) cands = [res.move];
-  // Belt and braces on top of the search: never walk into a one-move trap.
-  const safe = cands.filter((c) => !losesAtOnce(board, c));
-  if (safe.length > 0) cands = safe;
-
-  const column = cands.length === 1 ? cands[0] : weightedPick(cands, res.scores, rng);
-  const score = res.scores[column] > -INF ? res.scores[column] : res.score;
-  const pv = column === res.move ? res.pv : [column];
-  const proven = provenOf(score, res.depth, CELLS - board.moveCount);
-  return decide(column, score, res.depth, res.nodes, nowMs() - t0, pv, proven);
-}
-
-/**
- * A friendly beginner. Always takes a win it can see, covers an immediate
- * threat about {@link EASY_BLOCK_RATE} of the time, and otherwise picks from a
- * one-ply look with enough noise to feel human — never absurd, never perfect.
- */
-function chooseEasy(board: Board, rng: () => number): AiDecision {
-  const t0 = nowMs();
-  const me = board.toMove;
-
+  // Taking a win has to happen before the search, at every rung: negamax spots
+  // a four one ply *before* it is played, so it would score a position that is
+  // already won as though the game carried on.
   const win = board.winningMoveMask(me);
   if (win !== 0) {
     const c = centreMost(win);
@@ -674,32 +735,56 @@ function chooseEasy(board: Board, rng: () => number): AiDecision {
   }
 
   let pool = board.legalMoves();
-  const block = board.winningMoveMask(other(me));
-  if (block !== 0) {
-    if (rng() < EASY_BLOCK_RATE) {
-      const c = centreMost(block);
-      return decide(c, 0, 1, 1, nowMs() - t0, [c]);
+  if (tier.blockRate < 1) {
+    const block = board.winningMoveMask(other(me));
+    if (block !== 0) {
+      if (rng() < tier.blockRate) {
+        // With two threats the game is lost anyway; cover the more central one
+        // so the position at least stays sane.
+        const c = centreMost(block);
+        return decide(c, 0, 1, 1, nowMs() - t0, [c]);
+      }
+      // Not blocking this time: genuinely look elsewhere, so the rate is honest.
+      const elsewhere = pool.filter((c) => ((block >>> c) & 1) === 0);
+      if (elsewhere.length > 0) pool = elsewhere;
     }
-    // Not blocking this time: genuinely look elsewhere, so the rate is honest.
-    const elsewhere = pool.filter((c) => ((block >>> c) & 1) === 0);
-    if (elsewhere.length > 0) pool = elsewhere;
   }
 
-  let column = pool[0];
-  let bestNoisy = -Infinity;
-  let bestPlain = 0;
-  for (const c of pool) {
-    board.play(c);
-    const plain = -evaluate(board);
-    board.undo();
-    const noisy = plain + EASY_CENTRE[c] + rng() * EASY_NOISE;
-    if (noisy > bestNoisy) {
-      bestNoisy = noisy;
-      bestPlain = plain;
-      column = c;
+  const res =
+    tier.plies === 0
+      ? scanOnePly(board, pool)
+      : searchRoot(board, tier.plies, budgetMs, tier.noise > 0);
+
+  let cands = pool;
+  if (tier.trapFilter) {
+    const safe = pool.filter((c) => !losesAtOnce(board, c));
+    if (safe.length > 0) cands = safe;
+  }
+
+  let column: number;
+  if (tier.noise === 0 && tier.centrePull === 0) {
+    // Deterministic rung: play the search's own move so that provably equal
+    // moves resolve the way searchRoot resolved them (the more central one),
+    // not by the order this scan happens to run in.
+    column = cands.includes(res.move) ? res.move : bestScoring(cands, res.scores);
+  } else {
+    column = cands[0];
+    let bestNoisy = -Infinity;
+    for (const c of cands) {
+      // One rng() draw per candidate, in ascending column order: seeded runs
+      // have to replay move for move.
+      const noisy = res.scores[c] + tier.centrePull * ORDER_BONUS[c] + rng() * tier.noise;
+      if (noisy > bestNoisy) {
+        bestNoisy = noisy;
+        column = c;
+      }
     }
   }
-  return decide(column, bestPlain, 1, pool.length, nowMs() - t0, [column]);
+
+  const score = res.scores[column] > -INF ? res.scores[column] : res.score;
+  const pv = column === res.move ? res.pv : [column];
+  const proven = provenOf(score, res.depth, CELLS - board.moveCount);
+  return decide(column, score, res.depth, res.nodes, nowMs() - t0, pv, proven);
 }
 
 /**
@@ -719,6 +804,13 @@ export function chooseMove(board: Board, opts: SearchOptions): AiDecision {
   const legal = board.legalMoves();
   if (legal.length === 0) throw new Error('chooseMove: the board is full');
 
+  // The difficulty arrives from the UI and, in the worker, off a message port,
+  // so an unknown one is a real possibility rather than a type-system fiction.
+  const tier = TIERS[opts.difficulty] as Tier | undefined;
+  if (tier === undefined) {
+    throw new Error(`chooseMove: unknown difficulty ${String(opts.difficulty)}`);
+  }
+
   const rng = opts.rng ?? Math.random;
   const budget = opts.timeBudgetMs ?? DEFAULT_BUDGET[opts.difficulty];
   // The search plays and unplays on the caller's board; whatever happens, it
@@ -727,21 +819,7 @@ export function chooseMove(board: Board, opts: SearchOptions): AiDecision {
 
   let decision: AiDecision;
   try {
-    switch (opts.difficulty) {
-      case 'easy':
-        decision = chooseEasy(board, rng);
-        break;
-      case 'steady':
-      case 'medium':
-        decision = chooseMedium(board, budget, rng);
-        break;
-      case 'hard':
-      case 'grandmaster':
-        decision = chooseHard(board, budget);
-        break;
-      default:
-        throw new Error(`chooseMove: unknown difficulty ${String(opts.difficulty)}`);
-    }
+    decision = choose(board, tier, budget, rng);
   } finally {
     while (board.moveCount > baseline) board.undo();
   }
