@@ -16,7 +16,8 @@
     "icons": "node tools/make-icons.mjs",
     "smoke": "npm run build && node tools/smoke.mjs",
     "build:standalone": "vite build --config vite.config.standalone.ts",
-    "build:artifact": "npm run build:standalone && node tools/make-artifact.mjs"
+    "build:artifact": "npm run build:standalone && node tools/make-artifact.mjs",
+    "ladder": "npm run build && node tools/ladder-check.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

@@ -15,3 +15,6 @@ android/
 playtest/
 dist-standalone/
 dist-artifact/
+
+# Output of `npm run ladder`.
+ladder-result.txt
