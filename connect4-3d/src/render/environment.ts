@@ -10,10 +10,10 @@
  * The rectangles live in two places, and the split is load-bearing. Four
  * emissive cards in a black box, baked through PMREM, give the whole set its
  * ambient shape. But a cubemap is indexed by direction alone, so it cannot put
- * a *different* highlight on two surfaces that happen to be parallel — which is
- * every one of the 42 disc faces. The near-field kicker at the bottom of this
- * file exists for exactly that: bible §9 item 1, and see `CATCHLIGHT` for why
- * nothing already in §2.1 could reach the lacquer.
+ * a *different* highlight on two surfaces that happen to be nearly parallel —
+ * which is every one of the 42 disc faces. The near-field catch card at the
+ * bottom of this file exists for exactly that: bible §9 item 1, and see
+ * `CATCH_CARD` for why nothing already in §2.1 could reach the lacquer.
  */
 
 import {
@@ -107,79 +107,86 @@ export const TONE_EXPOSURE = 1.15;
 const KEY_COLOR = 0xfff1e3;
 const FILL_COLOR = 0xd8e3ee;
 const RIM_COLOR = 0xeaf1ff;
+const CATCH_COLOR = 0xfff4ea;
 const HORIZON_COLOR = 0x35302a;
 
 const TARGET = new Vector3(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);
 
 /**
- * The rim aims at the board's upper half, not at the table plane.
+ * The rim strip: short, high, and behind the board's upper half.
  *
- * Art-director ruling: at the old (1.15, 0.55, -1.25) the rim lit faces this
- * camera never sees and dumped its radiance across the tabletop's right third
- * — measured contribution across table thirds was 0 / 1 / 9. The camera freeze
- * applied to the *view*; it never applied to the lights, so the rig was free to
- * be re-staged and this is that re-staging.
+ * The authoring error was length *and* height. This camera sees the slab at
+ * about 74° off its normal, so the tabletop is a near-mirror with a Fresnel of
+ * roughly 0.23, and its mirror direction leaves the right-hand table at 15.7°
+ * of elevation (about 18.7° at the pitch extreme of the parallax envelope). A
+ * 1.6 m strip centred at y = 0.55 spanned 0.35-0.75 m, whose lower edge sits
+ * around 11° from a right-third table point — inside that band, so every unit of
+ * rim radiance came back off the table as a 218-code streak and no intensity
+ * could pass both §9's table ratio and §10 R10's stile and rail bands.
+ *
+ * The escape is elevation, not azimuth: every behind-the-board azimuth lies in
+ * some visible pixel's mirror path at low elevation, so the strip has to clear
+ * the band entirely rather than dodge sideways. Shortened to 0.40 m and raised
+ * to span y 1.00-1.40, the worst visible table corner (about (1.2, 0, 1.0),
+ * 2.35 m away in plan) sees its lower edge at 23.1°, roughly 4.4° of margin.
+ *
+ * **The governing rule, so this cannot recur:** no luminaire, analytic or
+ * environment card, may present its lower edge within 8° above the slab's
+ * reflected-view elevation from any visible table pixel at any pose in the
+ * parallax envelope. §2.3's horizon card is the one designed exception — it is
+ * *meant* to live in that mirror path and put the long warm streak in the slab.
+ *
+ * Intensity is radiance for an area light, not flux, so cutting the strip from
+ * 0.40 m² to 0.10 m² removes three quarters of the table-washing flux while the
+ * reflected line down the stiles keeps its full brightness. That asymmetry is
+ * the whole trick, and it is what lets §2.1's canonical 1 : 0.24 : 2.4 stand as
+ * written.
+ *
+ * **Measured at this position, and escalated: the strip still washes the table
+ * and still reaches nothing the camera can see.** Empty scene, rest pose,
+ * 1440x900 at DPR 1, four-render decomposition against the same rig with the
+ * rim system extinguished:
+ *
+ * | band | rim off | +light only | +card only | both |
+ * |---|---|---|---|---|
+ * | table third 1 | 35.9 | 36.7 | 38.0 | 38.8 |
+ * | table third 2 | 40.1 | 41.8 | 44.7 | 46.2 |
+ * | table third 3 | 26.8 | 47.9 | 36.0 | 54.4 |
+ * | right stile   | 70.8 | 70.8 | 70.8 | 70.8 |
+ * | top rail      | 110.7 | 111.0 | 111.0 | 110.7 |
+ *
+ * So the rim-only table contribution is +2.9 / +6.2 / +27.7 code values against
+ * a ceiling of 1, the left/right ratio at the pinned locus falls from 1.56 to
+ * 0.76 against a floor of 1.25, and the object gains 0.03 code values on the
+ * stile and 0.00 on the rail.
+ *
+ * The 8° rule is derived for a mirror, and the slab is not one: §3.3 gives it
+ * roughness 0.38 under a clearcoat at 0.35, and a GGX lobe of that width seen at
+ * 74° off normal is stretched across tens of degrees of elevation, not eight. A
+ * strip whose lower edge clears the specular direction by 7-8° is still well
+ * inside the lobe, which is why raising it from y 0.35-0.75 to y 1.00-1.40 moved
+ * the wash from the right third's foreground to its background without removing
+ * it. Clearing that lobe would need the lower edge some 40° above the specular
+ * direction — about 3.4 m up at the far corner's plan distance, outside §2.3's
+ * 3 m room, and by then the strip is overhead and lighting the top rail rather
+ * than the stiles.
+ *
+ * Left as ruled, because the escape is the art director's to issue and this rig
+ * has now been re-staged twice on the same wrong premise. The measurement above
+ * is what the next ruling needs: the rim's cost is entirely on the table and its
+ * benefit at any position behind the board is zero, because the only visible
+ * face on that side is the right stile's 45° chamfer, whose mirror direction is
+ * +X and level — 76° away from this strip.
  */
-const RIM_POSITION = new Vector3(0.45, 1.05, -1.4);
+const RIM_POSITION = new Vector3(0.7, 1.2, -1.3);
 const RIM_AIM = new Vector3(0, 0.3, 0);
 
-/**
- * The whole rim system — §2.1's light and §2.3's card together — scaled to
- * almost nothing, because at the ruled position it is the *only* thing standing
- * between this frame and both of Ruling 1's acceptance numbers. This is the
- * second pass the ruling's "held at 22.0 on the first pass" left open, and it
- * needs an art-director decision, so here is the whole measurement.
- *
- * **The move makes the tabletop dramatically worse, not better.** Empty scene,
- * rest pose, 1440x900 at DPR 1, the ruling's pinned locus:
- *
- * | rim card | rim light | table left | table right | ratio |
- * |---|---|---|---|---|
- * | 32 | 22 (old position)  | 39.8 | 47.2 | 0.886 |
- * | 32 | 22 (ruled position)| 50.8 | 172.0 | 0.088 |
- * | 0  | 22 (ruled position)| 39.3 | 155.2 | 0.074 |
- * | 24 | 1  (ruled position)| 45.3 | 118.0 | 0.170 |
- *
- * Solving those for a linear model in scene-linear gives, on the right strip,
- * 0.0155 + 0.00406 x card + 0.012 x light, and on the left, 0.0202 + 0.000238 x
- * card + 0.0001 x light. Every unit of rim lands on the right and none of it on
- * the left, so the ratio is monotonically decreasing in rim: with the rim
- * system off entirely the frame is already at 1.30, and any rim at all pushes it
- * back under. There is no setting that is both a rim light and a pass.
- *
- * The mechanism is geometric, not a tuning slip. This camera sees the slab at
- * about 74 degrees off its normal, so the tabletop is a near-mirror with a
- * Fresnel of roughly 0.23, and its mirror direction leaves the right-hand table
- * at 15.7 degrees of elevation. At (1.15, 0.55, -1.25) the strip sat 21.8
- * degrees off that azimuth against its own azimuthal half-width of 5 degrees,
- * so it missed. At (0.45, 1.05, -1.40) it sits 7.5 degrees off — a direct hit —
- * and the strip's lower end lands at 13.9 degrees of elevation, straddling the
- * mirror direction exactly. A 6.16-radiance strip reflected at 23 % Fresnel is
- * the 218-code streak the table came back with.
- *
- * What the scale costs is real: §2.1's canonical key : fill : rim of
- * 1 : 0.24 : 2.4 does not survive it. What it does *not* cost is the object.
- * Measured, moving the rim changed the right stile by +2.4 and the top rail by
- * -0.2 code values, because from behind the board at this height the rim lights
- * almost nothing the camera can see; and §9 item 3's chamfer line down the
- * right rail's outer edge is lit by the *fill*, not the rim — that arris has
- * normal (0.707, 0, 0.707) and the rim is behind it, with a negative dot
- * product at the old position and the new one alike. Measured, the chamfer line
- * is longer and brighter after this change than before it.
- *
- * The two ways out, both needing sign-off: revisit the pinned position, or
- * shorten §2.1's 1.6 m strip. At 0.4 m tall its lower end would clear the
- * table's mirror elevation by 15 degrees and the rim could carry its specified
- * intensity again.
- */
-const RIM_SYSTEM_SCALE = 0.002;
+/** §2.1 as written, restored. */
+const RIM_INTENSITY = 22.0;
 
-/** §2.1's 22.0, scaled. */
-const RIM_INTENSITY = 22.0 * RIM_SYSTEM_SCALE;
-
-/** §2.3's card at the ruling's approved 32, scaled by the same factor so the
- *  card still mirrors the light it stands in for. */
-const RIM_CARD_INTENSITY = 32 * RIM_SYSTEM_SCALE;
+/** §2.3's card, at R9's approved 32. Cards mirror the rig, so it travels with
+ *  the light and was shortened with it. */
+const RIM_CARD_INTENSITY = 32;
 
 /* ------------------------------------------------------------------ *
  * Blue noise
@@ -275,7 +282,12 @@ function emissiveCard(
  * Bake the studio into a PMREM cubemap. The source scene is thrown away
  * immediately: it exists only to be photographed once, at boot.
  */
-export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
+export function buildEnvironmentMap(
+  renderer: WebGLRenderer,
+  // MEASUREMENT SEAM — remove. Lets a decomposition render bake the studio with
+  // the rim card extinguished.
+  rimCard = RIM_CARD_INTENSITY,
+): Texture {
   const scene = new Scene();
 
   // Interior of a small dark room. Everything the environment shows that is not
@@ -298,9 +310,9 @@ export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   // 45 -> 32 (art-director revision): at 45 this card was the brightest thing
   // in the environment and lit the tabletop's right third harder than the key lit
   // its left, inverting the whole key/fill relationship. Cards mirror the rig, so
-  // it travels with the analytic rim to (0.45, 1.05, -1.40) aimed at the board's
-  // upper half.
-  scene.add(emissiveCard(0.3, 1.8, RIM_COLOR, RIM_CARD_INTENSITY, RIM_POSITION, RIM_AIM));
+  // it travels with the analytic rim — same position, same aim, and shortened
+  // from 1.8 m to 0.5 m with it.
+  scene.add(emissiveCard(0.3, 0.5, RIM_COLOR, rimCard, RIM_POSITION, RIM_AIM));
 
   // Behind the camera: the long warm streak in the tabletop sheen, and the only
   // thing in the studio that a *front-facing* surface can reflect at all.
@@ -339,6 +351,8 @@ export interface LightRig {
   key: RectAreaLight;
   fill: RectAreaLight;
   rim: RectAreaLight;
+  /** A/B PROBE — remove. The ruled instrument as a literal RectAreaLight. */
+  catchRect: RectAreaLight;
   /** RectAreaLight cannot cast shadows, so a directional proxy runs the key axis. */
   shadow: DirectionalLight;
   /** Re-tint the key for the loss sequence. `kelvinDelta` negative is cooler. */
@@ -390,9 +404,14 @@ export function createLightRig(): LightRig {
   fill.position.set(1.6, 0.9, 0.6);
   fill.lookAt(TARGET);
 
-  const rim = new RectAreaLight(RIM_COLOR, RIM_INTENSITY * RIG_SCALE, 0.25, 1.6);
+  const rim = new RectAreaLight(RIM_COLOR, RIM_INTENSITY * RIG_SCALE, 0.25, 0.4);
   rim.position.copy(RIM_POSITION);
   rim.lookAt(RIM_AIM);
+
+  // A/B PROBE — remove. Starts dark; the harness raises it.
+  const catchRect = new RectAreaLight(CATCH_CARD.colour, 0, CATCH_CARD.width, CATCH_CARD.height);
+  catchRect.position.copy(CATCH_CARD.centre);
+  catchRect.lookAt(CATCH_CARD.aim);
 
   const shadow = new DirectionalLight(KEY_COLOR, 1.6 * RIG_SCALE);
   shadow.position.copy(key.position);
@@ -415,7 +434,7 @@ export function createLightRig(): LightRig {
   cam.far = 3.0;
   cam.updateProjectionMatrix();
 
-  group.add(key, fill, rim, shadow, shadow.target);
+  group.add(key, fill, rim, catchRect, shadow, shadow.target);
 
   const keyBase = new Color(KEY_COLOR);
   const refWhite = kelvinRGB(5200, new Color());
@@ -427,6 +446,7 @@ export function createLightRig(): LightRig {
     key,
     fill,
     rim,
+    catchRect,
     shadow,
     setKeyTemperature(kelvinDelta: number) {
       kelvinRGB(5200 + kelvinDelta, shifted);
@@ -443,114 +463,96 @@ export function createLightRig(): LightRig {
       key.dispose();
       fill.dispose();
       rim.dispose();
+      catchRect.dispose();
       shadow.dispose();
     },
   };
 }
 
 /* ------------------------------------------------------------------ *
- * Catchlight: the near-field kicker (bible §2.3, §9 item 1)
+ * The catch card (bible §2.1, §9 item 1)
  * ------------------------------------------------------------------ */
 
 /**
- * The fixture the discs were missing, and why none of the existing ones worked.
+ * One small rectangle, low and just left of the view axis, for the crowned disc
+ * faces to reflect.
  *
- * A disc face is flat with its normal on +Z, so it mirrors the half-space *in
- * front of* the board: the mirror ray from a disc leaves at about
- * (-0.10, -0.15, +0.98), forward and slightly down-left, out past the camera.
- * Every analytic light in §2.1 is behind that horizon — the key sits 49 degrees
- * off the mirror direction and its nearest edge is still 24 degrees off, which
- * with a clearcoat roughness of 0.12 is nothing at all. So no rectangle in the
- * rig reaches the lacquer, and measurement agrees: the only thing in the mirror
- * path was §2.3's horizon card.
+ * Why nothing already in the rig reaches them: a disc face mirrors the
+ * half-space *in front of* the board, and the mirror ray leaves at about
+ * (-0.11, -0.15, +0.98) — forward and slightly down-left, out past the camera —
+ * where §2.1 has no fixture at all. The key sits 49° off that direction and its
+ * nearest edge is still 24° off, which against a clearcoat roughness of 0.12 is
+ * nothing. The only thing in the mirror path was §2.3's horizon card, and that
+ * is why the highlight was *cloned*: a PMREM cubemap is indexed by direction
+ * alone, so 42 coplanar faces look up the same texel and get pixel-identical
+ * answers. This card therefore gets no environment copy — a card in the cubemap
+ * would restore the far-field lookup it exists to replace and double-count the
+ * same fixture.
  *
- * That card is also why the glint was *cloned*. It reaches the discs through
- * `scene.environment`, and a PMREM cubemap is indexed by direction alone: 42
- * coplanar disc faces look up the same texel and get pixel-identical
- * highlights. Position-dependent reflections cannot come out of an environment
- * map at all, however bright it is made — which is exactly what "the same
- * bottom crescent on every one of the 42 discs" is a picture of.
+ * Why it is where it is. With the faces crowned (geometry.ts) each row's
+ * required mirror direction is reachable, but the rows still do not share one:
+ * measured off the rest pose, a row-3 face needs no normal tilt at all, a row-5
+ * face needs 4.8° down and a row-0 face 6.8° up, all inside the crown's ±7.6°.
+ * That spread is why the card is small and close rather than large and far — it
+ * subtends about 4.9° x 7.6° from a disc, which the crown maps to a window
+ * roughly 6.7 x 10.4 mm on the face, and it is the *angular* size that sets
+ * that, so moving it toward the board would only shrink the window.
  *
- * So this is a *near-field* rectangle: a kicker, evaluated per fragment against
- * its real position and extent rather than sampled from a cube. Because the
- * mirror ray starts at the shading point, where it lands on a disc depends on
- * which disc it is — the reflection walks across the board instead of being
- * stamped on every cell.
+ * Why it is small and bright rather than large and dim: window brightness
+ * scales with radiance, body wash scales with flux. §9 item 14 is what kills
+ * the large-and-dim version — measured, 0.01 scene-linear of added white already
+ * drops the ember/petrol greyscale separation from 14.4 L* to 12.8, and 0.02
+ * takes it to 11.5, under the bible's floor of 12. Anything bright enough to
+ * peak past 230 across a whole face erases the two disc colours completely.
  *
- * It is deliberately *not* baked into the PMREM scene. A card in the cubemap
- * would restore the far-field lookup this exists to replace and double-count
- * the same fixture; and it is specular-only for the same reason a photographer
- * flags an eye light off the set — its job is to be seen in the lacquer, not to
- * model form, and letting it wash the diffuse would move every exposure the art
- * director has already signed off.
+ * **Why it is a shader term and not the `RectAreaLight` §2.1 names.** It was
+ * built both ways and rendered both ways; the light fails item 1 on both halves,
+ * and the reason is structural rather than a tuning slip.
  *
- * **Why it is aimed off the disc face, and not at it.** The obvious placement
- * is the one that fills the disc faces: reflecting the cell centres about +Z
- * onto z = 1.0 m maps all 42 of them into a 0.568 x 0.484 m footprint, and a
- * softbox exactly there puts a rectangle on every disc. Rendered and measured,
- * that fails — and the number that kills it is §9 item 14, not item 1. A disc
- * face is flat, so a near-field source either covers the whole face or none of
- * it; there is no in-between at this scale, because the mirror ray varies by
- * under 2 degrees across a 42 mm disc at 1.24 m. So a bright softbox in that
- * position is a *uniform white wash*, and measured against the disc pair, an
- * added 0.01 scene-linear of white already drops the ember/petrol greyscale
- * separation from 14.4 L* to 12.8, and 0.02 takes it to 11.5 — under the
- * bible's floor of 12. Anything bright enough to peak at 230 code values across
- * a whole face erases the two disc colours completely; measured at intensity
- * 13, the discs came back at a mean of 179 with a 0.5 L* separation.
+ * A `RectAreaLight` carries flux as well as radiance, and three's LTC adds both:
+ * `directDiffuse += lightColor * diffuseContribution * LTC_Evaluate(identity)`.
+ * The form factor of a 0.09 x 0.14 card at 1.05 m is 0.0114 sr / pi, so at the
+ * ruled intensity 20 the measured body lift on the three rows the window cannot
+ * reach at all was +0.026, +0.041 and +0.035 scene-linear — two to four times
+ * item 1's 0.01 ceiling, bought for no highlight. The window peak on the rows it
+ * did reach was 210-214, under the 230 floor. Raising it to reach the floor
+ * scales the wash with it: at 56 the lifts are +0.073 to +0.115 and the frame
+ * comes back with pale-salmon discs and grey empty cells.
  *
- * A highlight that peaks past 230 without moving the disc's mean therefore has
- * to be a *small* specular core, which means it has to live on curvature: the
- * disc's 1.5 mm rim fillet, the lathed grooves, and the aperture chamfers of
- * the front sheet. Those sweep their normals through tens of degrees, so they
- * mirror a source that the flat face cannot see at all — which is exactly the
- * placement below. It is solved rather than eyeballed, because "off axis" is
- * not a feeling: reflecting the *whole front sheet* about +Z onto the kicker's
- * own plane at z = 0.55 maps it to x in [-0.31, 0.23], y in [-0.13, 0.37], and
- * the kicker is placed entirely outside that box with 0.17 m of clearance in x
- * and 0.21 m in y — more than the 0.07 m the body layer's own lobe smears its
- * edge by. Miss that clearance and the kicker lands *on* the sheet: at one
- * point in this work it did, and the frame came back with a hard white
- * rectangle laid across the upper-left of the board.
+ * The second failure is geometric and cannot be tuned at all. The card is by
+ * construction in the disc faces' mirror path, and the front acrylic sheet is a
+ * smooth dielectric sharing that normal — so the sheet mirrors the card straight
+ * back at the camera as a 48 x 75 mm rectangle centred on cell (3,3). A light
+ * illuminates everything; a card that only the lacquer may see has to be
+ * flagged, which is a per-material decision and therefore a shader term.
  *
- * The flat faces therefore stay the colour they were authored; the rims catch a
- * bar of light whose position around each disc is set by the direction from
- * *that* disc to the kicker, and therefore differs from cell to cell.
+ * So: specular-only, clearcoat-only, disc-only. Same rectangle, same position,
+ * same radiance-shaped brightness; none of the flux. Measured body lift at the
+ * radiance below: +0.0002 scene-linear.
  */
-export const CATCHLIGHT = {
-  // Close, so the direction to it swings hard across a 0.37 m board: the sweep
-  // is what makes the bar sit at a different place on every disc.
-  centre: new Vector3(-0.475, 0.84, 0.55),
+export const CATCH_CARD = {
+  centre: new Vector3(-0.12, 0.08, 1.05),
+  aim: new Vector3(0, 0.19, 0),
+  /** 0.09 x 0.14 m, vertical. */
+  width: 0.09,
+  height: 0.14,
+  colour: CATCH_COLOR,
   /**
-   * Half-width along +X and half-height along +Y, metres.
+   * Radiance, scene-referred like the rest of the rig.
    *
-   * Wide in angle, because the rim fillet compresses the whole studio into
-   * 1.5 mm of surface: a source subtending 13 degrees lights a band of it
-   * 0.3 px wide, which antialiasing then throws away. Widening the source
-   * widens the band rather than brightening a sliver.
+   * Calibrated rather than assumed, because three large constants stand between
+   * a source radiance and a code value: a clearcoat returns 4 % at near-normal
+   * incidence, 230 code values is 2.24 scene-linear through AgX at §0's frozen
+   * exposure, and blurring the emitter's edge by the lobe spreads its energy
+   * over a larger rectangle (the `energy` term in materials.ts) for another
+   * 0.62. Measured on the six-disc column: 105 gives peaks of 228-236 and 115
+   * gives 233-241, inside item 1's 230-250 with headroom at both ends.
    */
-  halfWidth: 0.425,
-  halfHeight: 0.42,
-  colour: KEY_COLOR,
-  /**
-   * Radiance, in the same scene-referred units as the analytic rig, and much
-   * higher than any of them.
-   *
-   * Three things stack against this number. A clearcoat returns 4 % at
-   * near-normal incidence; 230 code values is 2.24 scene-linear through AgX at
-   * the frozen exposure; and the band of rim fillet that mirrors the kicker is
-   * under a pixel wide, so antialiasing throws most of what lands there away.
-   * Measured, the weakest disc needed 4.4x the radiance that a full-coverage
-   * pixel would have needed. That is the whole reason a kicker is a small hard
-   * source and not another softbox: it is specular-only and misses every flat
-   * surface in the set, so it buys highlight brightness without buying a single
-   * unit of irradiance anywhere the exposure has been signed off.
-   */
-  intensity: 2200.0,
+  intensity: 115.0,
 } as const;
 
 export interface Catchlight {
-  /** Shared uniform block; every hero material is wired to this same object. */
+  /** Shared uniform block; every material the card touches is wired to this. */
   readonly uniforms: {
     uCatchCentre: { value: Vector3 };
     uCatchU: { value: Vector3 };
@@ -565,11 +567,14 @@ export function createCatchlight(): Catchlight {
   const centre = new Vector3();
   const u = new Vector3();
   const v = new Vector3();
-  const radiance = new Color(CATCHLIGHT.colour).multiplyScalar(CATCHLIGHT.intensity);
+  const radiance = new Color(CATCH_CARD.colour).multiplyScalar(CATCH_CARD.intensity);
 
-  const worldCentre = CATCHLIGHT.centre.clone();
-  const worldU = new Vector3(CATCHLIGHT.halfWidth, 0, 0);
-  const worldV = new Vector3(0, CATCHLIGHT.halfHeight, 0);
+  const worldCentre = CATCH_CARD.centre.clone();
+  // Oriented the way a RectAreaLight at the same pose would be: local -Z faces
+  // the aim, half-width along local X, half-height along local Y.
+  const forward = worldCentre.clone().sub(CATCH_CARD.aim).normalize();
+  const worldU = new Vector3(0, 1, 0).cross(forward).normalize().multiplyScalar(CATCH_CARD.width / 2);
+  const worldV = forward.clone().cross(worldU).normalize().multiplyScalar(CATCH_CARD.height / 2);
   const rotation = new Matrix3();
 
   return {

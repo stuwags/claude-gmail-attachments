@@ -199,6 +199,49 @@ const GROOVE_SEGMENTS = 4;
 /** Segments across the 1.5 mm rim fillet, per side. */
 const FILLET_SEGMENTS = 4;
 
+/**
+ * The face crown (bible §1.2, as revised): 1.4 mm of sagitta across the 42 mm
+ * face.
+ *
+ * An optically flat face aimed at the camera is a dead mirror pointed at
+ * nothing — it reflects the view ray forward past the camera, where the rig has
+ * nothing to offer — and worse, the camera pitches down 8.8°, so the six rows
+ * do not share a mirror path at all: a flat top-row face sends the view to
+ * y ≈ +0.26 at z = 1.05 and a flat bottom-row face to y ≈ −0.17, and no single
+ * source position is visible to both. Real premium lacquered pieces are crowned
+ * for exactly this reason.
+ *
+ * 1.4 mm swings the face normal through ±7.6°, so ±15.2° of mirror coverage,
+ * which is what brings every row within reach of one small catch card. The
+ * ceiling is the slot: 1.4 mm of crown makes the disc 10.4 mm thick at its
+ * centre and leaves 0.6 mm of clearance in the 11 mm gap, so 1.5 mm is the
+ * absolute limit and this stops just under it.
+ */
+const CROWN_SAGITTA = 0.0014;
+/** Crown sphere radius from the sagitta across the full face: R = (a² + s²) / 2s. */
+const CROWN_RADIUS = (DISC_RADIUS * DISC_RADIUS + CROWN_SAGITTA * CROWN_SAGITTA) / (2 * CROWN_SAGITTA);
+/** Height of the crown above the rim plane, at radius r. Zero at r = DISC_RADIUS. */
+const crownRise = (r: number): number =>
+  Math.sqrt(CROWN_RADIUS * CROWN_RADIUS - r * r) -
+  Math.sqrt(CROWN_RADIUS * CROWN_RADIUS - DISC_RADIUS * DISC_RADIUS);
+
+/**
+ * Profile rows across the crown, stepped by normal swing rather than by radius.
+ *
+ * What the crown is *for* is a mirror-direction gradient, and the highlight's
+ * soft edge is that gradient resolved: 0.8° of normal per row is 1.6° of mirror
+ * per row against a catch card that subtends about 5° x 7.5°, so the window's
+ * edge is carried by several rows rather than by one.
+ */
+const CROWN_NORMAL_STEP = (0.8 * Math.PI) / 180;
+const crownSegments = (r0: number, r1: number): number =>
+  Math.max(
+    1,
+    Math.ceil(
+      (Math.asin(r1 / CROWN_RADIUS) - Math.asin(r0 / CROWN_RADIUS)) / CROWN_NORMAL_STEP,
+    ),
+  );
+
 export interface DiscGeometry {
   geometry: BufferGeometry;
   /** UV.v spans covered by each lathed groove, for baking the albedo AO ring. */
@@ -211,6 +254,10 @@ export interface DiscGeometry {
 
 /**
  * The disc profile, revolved.
+ *
+ * The face is a spherical crown; the grooves are cut into it and follow it. The
+ * back face stays flat and the rim keeps its 21 mm radius, so the crown is the
+ * only thing that moved.
  *
  * Grooves are cut into the front face only. The camera is on a tripod with a
  * ±5° yaw envelope and never leaves the front of the board, so the back face of
@@ -229,27 +276,50 @@ function discProfile(): { pts: Vector2[]; grooves: [number, number][] } {
   const gw = DISC_GROOVE_WIDTH;
   const gd = DISC_GROOVE_DEPTH;
 
-  const pts: Vector2[] = [new Vector2(0, H)];
+  // The crown sphere's centre, on the axis, in profile coordinates.
+  const crownCentreY = H + CROWN_SAGITTA - CROWN_RADIUS;
+  // The front fillet, seated tangent to both the crown and the rim cylinder: F
+  // in from the rim, F under the crown. That keeps face, fillet and rim one
+  // smooth run instead of leaving a 7° kink where the crown meets a fillet that
+  // was authored against a flat face. The rim's radius and its lower edge do not
+  // move; its top rises by 0.18 mm, which is just the crown arriving.
+  const filletCentreR = R - F;
+  const filletCentreY =
+    crownCentreY + Math.sqrt((CROWN_RADIUS - F) ** 2 - filletCentreR * filletCentreR);
+  const filletStart = Math.asin(filletCentreR / (CROWN_RADIUS - F));
+  const faceEdge = filletCentreR + Math.sin(filletStart) * F;
+
+  const pts: Vector2[] = [new Vector2(0, H + CROWN_SAGITTA)];
   const grooves: [number, number][] = [];
 
+  /** Walk the crown out to `r1` from wherever the profile currently ends. */
+  const crownOut = (r1: number) => {
+    const r0 = pts[pts.length - 1].x;
+    const n = crownSegments(r0, r1);
+    for (let i = 1; i <= n; i++) {
+      const r = r0 + ((r1 - r0) * i) / n;
+      pts.push(new Vector2(r, H + crownRise(r)));
+    }
+  };
+
   for (const rc of DISC_GROOVE_RADII) {
-    pts.push(new Vector2(rc - gw / 2, H));
+    crownOut(rc - gw / 2);
     const start = pts.length - 1;
     for (let i = 1; i <= GROOVE_SEGMENTS; i++) {
       const t = i / GROOVE_SEGMENTS;
       const r = rc - gw / 2 + gw * t;
-      const y = H - gd * 0.5 * (1 - Math.cos(2 * Math.PI * t));
+      const y = H + crownRise(r) - gd * 0.5 * (1 - Math.cos(2 * Math.PI * t));
       pts.push(new Vector2(r, y));
     }
     grooves.push([start, pts.length - 1]);
   }
 
-  // Front face out to the fillet tangent, then the fillet, the rim, the second
-  // fillet, and straight back to the axis.
-  pts.push(new Vector2(R - F, H));
+  // Crown out to the fillet's tangent point, then the fillet, the rim, the
+  // second fillet, and straight back to the axis.
+  crownOut(faceEdge);
   for (let i = 1; i <= FILLET_SEGMENTS; i++) {
-    const a = (i / FILLET_SEGMENTS) * (Math.PI / 2);
-    pts.push(new Vector2(R - F + Math.sin(a) * F, H - F + Math.cos(a) * F));
+    const a = filletStart + (i / FILLET_SEGMENTS) * (Math.PI / 2 - filletStart);
+    pts.push(new Vector2(filletCentreR + Math.sin(a) * F, filletCentreY + Math.cos(a) * F));
   }
   pts.push(new Vector2(R, -(H - F)));
   for (let i = 1; i <= FILLET_SEGMENTS; i++) {
@@ -258,7 +328,27 @@ function discProfile(): { pts: Vector2[]; grooves: [number, number][] } {
   }
   pts.push(new Vector2(0, -H));
 
-  return { pts, grooves };
+  // Re-centre in the slot. The crown is all on the front, so a disc built about
+  // its old mid-plane would stand 5.9 mm proud of it and foul the front sheet,
+  // which sits at 5.5 mm. Shifting by half the sagitta splits the 0.6 mm of
+  // clearance evenly, 0.3 mm a side.
+  for (const p of pts) p.y -= CROWN_SAGITTA / 2;
+
+  // Hand the profile to the lathe back-face-first.
+  //
+  // `LatheGeometry` takes the outward normal to be the profile tangent turned a
+  // quarter clockwise — `( dy, -dx )` — and winds its triangles to match. A
+  // profile authored front-face-first therefore comes back inside out: the
+  // grooved face's normals point away from the camera, its triangles are wound
+  // away too, and `side: FrontSide` culls them. Everything still *looks* like a
+  // disc, because what the camera then sees is the inside of the flat back face
+  // — which is exactly the "42 coplanar faces, one identical highlight" the
+  // crown exists to fix. Reversing costs nothing and is the whole fix; it is
+  // done here rather than by authoring backwards so the profile still reads in
+  // the order the bible describes it.
+  pts.reverse();
+  const last = pts.length - 1;
+  return { pts, grooves: grooves.map(([a, b]) => [last - b, last - a] as [number, number]) };
 }
 
 export function createDiscGeometry(radialSegments = DISC_RADIAL_SEGMENTS): DiscGeometry {
@@ -298,6 +388,10 @@ export function createDiscGeometry(radialSegments = DISC_RADIAL_SEGMENTS): DiscG
  * A cheaper disc for the hover ghost: no grooves, no albedo, 64 segments. It is
  * drawn with an additive fresnel that hides everything but the silhouette, so
  * paying full disc price for it would be waste.
+ *
+ * Reversed for the same reason as the hero profile: inside out, every fragment
+ * reads `dot( N, V ) <= 0`, the fresnel saturates at 1 everywhere, and §3.4's
+ * 0.10-centre-to-0.45-rim ramp collapses into a flat 0.45 disc.
  */
 export function createGhostDiscGeometry(): BufferGeometry {
   const R = DISC_RADIUS;
@@ -314,6 +408,7 @@ export function createGhostDiscGeometry(): BufferGeometry {
     pts.push(new Vector2(R - F + Math.cos(a) * F, -(H - F) - Math.sin(a) * F));
   }
   pts.push(new Vector2(0, -H));
+  pts.reverse();
   const geo = new LatheGeometry(pts, 64);
   geo.rotateX(Math.PI / 2);
   return geo;

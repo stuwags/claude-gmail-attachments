@@ -302,8 +302,8 @@ class BoardScene implements SceneBoardView {
   private ghostMat!: GhostMaterial;
   private lights!: LightRig;
   /**
-   * The near-field front softbox (environment.ts). It has no scene node — it is
-   * a rectangle the hero shaders intersect — so the frame loop is what keeps it
+   * The near-field catch card (environment.ts). It has no scene node — it is a
+   * rectangle the disc shader intersects — so the frame loop is what keeps it
    * in view space.
    */
   private readonly catchlight: Catchlight = createCatchlight();
@@ -366,6 +366,13 @@ class BoardScene implements SceneBoardView {
   /** Verbosity the coach returns to whenever a report is present. */
   private coachMode: Exclude<CoachMode, 'off'> = 'full';
 
+  /** MEASUREMENT SEAM — remove. Re-bake the studio with the rim card dimmed. */
+  __setRimCard(intensity: number): void {
+    this.envMap?.dispose();
+    this.envMap = buildEnvironmentMap(this.renderer, intensity);
+    this.scene.environment = this.envMap;
+  }
+
   private readonly raycaster = new Raycaster();
   private readonly pickPlane = new Plane(new Vector3(0, 0, 1), 0);
   private readonly scratchV3 = new Vector3();
@@ -418,6 +425,8 @@ class BoardScene implements SceneBoardView {
 
     this.rig = new CameraRig(this.reducedMotion);
     this.camera = this.rig.camera;
+    // MEASUREMENT SEAM — remove. Decomposition renders need the rig itself.
+    (globalThis as unknown as { __c4view?: unknown }).__c4view = this;
   }
 
   /* ---------------------------------------------------------------- *

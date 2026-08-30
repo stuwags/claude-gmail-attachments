@@ -244,21 +244,21 @@ function basaltSurface(size = 1024) {
 }
 
 /* ------------------------------------------------------------------ *
- * Catchlight (bible §2.3, §9 item 1)
+ * The catch card (bible §2.1, §9 item 1)
  * ------------------------------------------------------------------ */
 
 /**
- * The near-field softbox, evaluated by intersecting the mirror ray with it.
+ * The card, evaluated by intersecting the mirror ray with it.
  *
  * The reflected image of a rectangle in a smooth surface is that rectangle, so
  * tracing the mirror ray to the emitter's plane and testing whether it landed
  * inside gives the window shape directly — no LTC tables, no numerical
  * integration, and the *shape* is exact rather than a lobe that happens to look
  * rectangular. What matters for §9 item 1 is that the ray starts at the shading
- * point: two coplanar disc faces 0.28 m apart send their mirror rays to
- * different parts of the softbox, so the highlight walks across the board.
- * `scene.environment` cannot do that at any intensity, because a cubemap lookup
- * is a function of direction alone.
+ * point and uses the crowned face's real normal: two disc faces a row apart aim
+ * their mirror rays 3° differently, so the window sits at a different place on
+ * each of them and walks across the board. `scene.environment` cannot do that
+ * at any intensity, because a cubemap lookup is a function of direction alone.
  *
  * Peak reflected radiance is the emitter's own radiance, which is the correct
  * answer for any source larger than the specular lobe — which this one is, by a
@@ -310,16 +310,15 @@ vec3 catchlightRadiance( const in vec3 P, const in vec3 N, const in vec3 V, cons
 `;
 
 /**
- * Where the kicker lands, and — as important — where it does not.
+ * Where the card lands, and — as important — where it does not.
  *
  * Under a clearcoat the coat is the mirror: light reaching the body has already
  * refracted through it, so adding the same rectangle a second time on a
  * roughness-0.34 body layer would double-count it *and* smear it. That smear is
- * not cosmetic. The body's lobe blurs the emitter's edge by alpha * t, about
- * 70 mm at this range against the clearcoat's 9 mm, and the kicker is placed
- * only just outside the front sheet's reflected footprint — so the body term
- * would drag the rectangle back onto the sheet and put a white wash over the
- * board, which is exactly what it did before this guard existed.
+ * not cosmetic: the body's lobe blurs the emitter's edge by alpha * t, about
+ * 120 mm at this range against the clearcoat's 15 mm, which would turn a window
+ * into a wash across the whole face and take §9 item 14's greyscale separation
+ * with it.
  */
 const CATCHLIGHT_APPLY = /* glsl */ `
 #include <lights_fragment_end>
@@ -340,7 +339,7 @@ const CATCHLIGHT_APPLY = /* glsl */ `
 export type CatchlightUniforms = Record<string, { value: unknown }>;
 
 /**
- * Wire a material to the catchlight. Composes with an existing
+ * Wire a material to the catch card. Composes with an existing
  * `onBeforeCompile`, so the disc can carry both this and its treatment
  * attribute.
  */
@@ -508,7 +507,7 @@ export function createMaterials(
   // is far below the threshold where a normal map starts to look like texture.
   disc.clearcoatNormalScale = new Vector2(0.06, 0.06);
   injectDiscTreatment(disc);
-  injectCatchlight(disc, catchlight, 'disc-treatment-catchlight-v1');
+  injectCatchlight(disc, catchlight, 'disc-treatment-catchlight-v2');
 
   /* ---- acrylic ---- */
 
@@ -542,10 +541,13 @@ export function createMaterials(
   // Cast acrylic is nearly optically flat. Any more than this and the veiling
   // haze the bible wants turns into frosting.
   acrylic.normalScale = new Vector2(0.08, 0.08);
-  // The front sheet shares the discs' +Z normal, so the softbox lands on the
-  // webs between apertures and on the panel margins — which is where the
-  // window's own edges become visible as a rectangle rather than as a wash.
-  injectCatchlight(acrylic, catchlight, 'acrylic-catchlight-v1');
+  // Deliberately *not* wired to the catch card. The sheet is flat and shares
+  // the disc's old normal, so it mirrors the card straight back at the camera:
+  // the card's virtual image lands on the sheet as a 48 x 75 mm rectangle
+  // centred on cell (3,3) — as bright as the disc windows, and pasted across
+  // the middle of the board. Flagging it off the sheet is what a photographer
+  // does with an eye light, and it is the whole reason this card is a shader
+  // term rather than a scene light (see `CATCH_CARD`).
 
   /* ---- acrylic, back sheet ---- */
 
