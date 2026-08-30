@@ -17,7 +17,10 @@ that rendered frames are graded against.
 Needs Node 20.19+ (or 22.12+). Check with `node -v`; on a Mac, `brew install node`.
 
 ```bash
-git clone https://github.com/stuwags/claude-gmail-attachments
+# -b matters: the game lives on this branch, not on main, so a plain clone
+# lands somewhere without a connect4-3d directory at all.
+git clone -b claude/3d-connect4-ai-game-8mo1ai \
+  https://github.com/stuwags/claude-gmail-attachments
 cd claude-gmail-attachments/connect4-3d
 
 # The skip flag avoids downloading ~150 MB of Chromium you don't need —
