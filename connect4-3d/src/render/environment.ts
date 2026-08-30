@@ -282,12 +282,7 @@ function emissiveCard(
  * Bake the studio into a PMREM cubemap. The source scene is thrown away
  * immediately: it exists only to be photographed once, at boot.
  */
-export function buildEnvironmentMap(
-  renderer: WebGLRenderer,
-  // MEASUREMENT SEAM — remove. Lets a decomposition render bake the studio with
-  // the rim card extinguished.
-  rimCard = RIM_CARD_INTENSITY,
-): Texture {
+export function buildEnvironmentMap(renderer: WebGLRenderer): Texture {
   const scene = new Scene();
 
   // Interior of a small dark room. Everything the environment shows that is not
@@ -312,7 +307,7 @@ export function buildEnvironmentMap(
   // its left, inverting the whole key/fill relationship. Cards mirror the rig, so
   // it travels with the analytic rim — same position, same aim, and shortened
   // from 1.8 m to 0.5 m with it.
-  scene.add(emissiveCard(0.3, 0.5, RIM_COLOR, rimCard, RIM_POSITION, RIM_AIM));
+  scene.add(emissiveCard(0.3, 0.5, RIM_COLOR, RIM_CARD_INTENSITY, RIM_POSITION, RIM_AIM));
 
   // Behind the camera: the long warm streak in the tabletop sheen, and the only
   // thing in the studio that a *front-facing* surface can reflect at all.
@@ -351,8 +346,6 @@ export interface LightRig {
   key: RectAreaLight;
   fill: RectAreaLight;
   rim: RectAreaLight;
-  /** A/B PROBE — remove. The ruled instrument as a literal RectAreaLight. */
-  catchRect: RectAreaLight;
   /** RectAreaLight cannot cast shadows, so a directional proxy runs the key axis. */
   shadow: DirectionalLight;
   /** Re-tint the key for the loss sequence. `kelvinDelta` negative is cooler. */
@@ -408,11 +401,6 @@ export function createLightRig(): LightRig {
   rim.position.copy(RIM_POSITION);
   rim.lookAt(RIM_AIM);
 
-  // A/B PROBE — remove. Starts dark; the harness raises it.
-  const catchRect = new RectAreaLight(CATCH_CARD.colour, 0, CATCH_CARD.width, CATCH_CARD.height);
-  catchRect.position.copy(CATCH_CARD.centre);
-  catchRect.lookAt(CATCH_CARD.aim);
-
   const shadow = new DirectionalLight(KEY_COLOR, 1.6 * RIG_SCALE);
   shadow.position.copy(key.position);
   shadow.target.position.copy(TARGET);
@@ -434,7 +422,7 @@ export function createLightRig(): LightRig {
   cam.far = 3.0;
   cam.updateProjectionMatrix();
 
-  group.add(key, fill, rim, catchRect, shadow, shadow.target);
+  group.add(key, fill, rim, shadow, shadow.target);
 
   const keyBase = new Color(KEY_COLOR);
   const refWhite = kelvinRGB(5200, new Color());
@@ -446,7 +434,6 @@ export function createLightRig(): LightRig {
     key,
     fill,
     rim,
-    catchRect,
     shadow,
     setKeyTemperature(kelvinDelta: number) {
       kelvinRGB(5200 + kelvinDelta, shifted);
@@ -463,7 +450,6 @@ export function createLightRig(): LightRig {
       key.dispose();
       fill.dispose();
       rim.dispose();
-      catchRect.dispose();
       shadow.dispose();
     },
   };
@@ -527,8 +513,18 @@ export function createLightRig(): LightRig {
  * flagged, which is a per-material decision and therefore a shader term.
  *
  * So: specular-only, clearcoat-only, disc-only. Same rectangle, same position,
- * same radiance-shaped brightness; none of the flux. Measured body lift at the
- * radiance below: +0.0002 scene-linear.
+ * same radiance-shaped brightness; none of the flux. The mask reaches exactly
+ * zero 7.5 mm from the window's centre, so the card's own contribution to the
+ * face outside its footprint is zero by construction rather than by tuning.
+ *
+ * What is left outside the window is a local halo: measured card-off to card-on,
+ * a face annulus 10-13 mm from the window centre lifts by 0.020-0.059
+ * scene-linear on the three rows whose window is fully on the face, the acrylic
+ * between two lit cells lifts 11 code values, the panel 50 px away lifts 0.8,
+ * and the *neighbouring disc* lifts 0.1. That decay profile is post, not the
+ * card — item 1 asks for a 230-250 peak, which is 2.4 scene-linear, and §4.3
+ * blooms everything above 1.0. See the report against item 1: the peak band and
+ * the 0.01 body-lift guard cannot both hold while bloom's threshold is 1.0.
  */
 export const CATCH_CARD = {
   centre: new Vector3(-0.12, 0.08, 1.05),

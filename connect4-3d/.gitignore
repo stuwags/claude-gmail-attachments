@@ -10,3 +10,6 @@ ios/
 android/
 *.local
 .DS_Store
+
+# Throwaway captures from tools/playtest runs.
+playtest/
